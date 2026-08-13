@@ -5,12 +5,29 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
+import Explore from "./pages/Explore";
+import AttractionDetail from "./pages/AttractionDetail";
+import Book from "./pages/Book";
+import MyBookings from "./pages/MyBookings";
+import Itinerary from "./pages/Itinerary";
+import AdminOverview from "./pages/admin/AdminOverview";
+import AdminAttractions from "./pages/admin/AdminAttractions";
+import AdminCategories from "./pages/admin/AdminCategories";
+import AdminBookings from "./pages/admin/AdminBookings";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path={"/"} component={Home} />
+      <Route path={"/explore"} component={Explore} />
+      <Route path={"/explore/:slug"} component={AttractionDetail} />
+      <Route path={"/book"} component={Book} />
+      <Route path={"/bookings"} component={MyBookings} />
+      <Route path={"/itinerary"} component={Itinerary} />
+      <Route path={"/admin"} component={AdminOverview} />
+      <Route path={"/admin/attractions"} component={AdminAttractions} />
+      <Route path={"/admin/categories"} component={AdminCategories} />
+      <Route path={"/admin/bookings"} component={AdminBookings} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
@@ -18,18 +35,10 @@ function Router() {
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
           <Router />

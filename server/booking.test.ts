@@ -1,0 +1,312 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { TrpcContext } from "./_core/context";
+import { appRouter } from "./routers";
+
+// ---------------------------------------------------------------------------
+// Fakes for the database layer so tests run without a live connection.
+// ---------------------------------------------------------------------------
+vi.mock("./db", async importOriginal => {
+  const actual = await importOriginal<typeof import("./db")>();
+
+  const categories = [
+    {
+      id: 1,
+      name: "Adult (Ghanaian)",
+      slug: "adult-ghanaian",
+      pricePesewas: 2500,
+      description: "Ages 13 and above",
+      isActive: true,
+      sortIndex: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 2,
+      name: "Child",
+      slug: "child",
+      pricePesewas: 500,
+      description: "Under 12",
+      isActive: true,
+      sortIndex: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 3,
+      name: "Student",
+      slug: "student",
+      pricePesewas: 1500,
+      description: "Tertiary students with valid ID",
+      isActive: true,
+      sortIndex: 2,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 4,
+      name: "Foreigner Adult",
+      slug: "foreigner-adult",
+      pricePesewas: 10000,
+      description: "Non-Ghanaian adults",
+      isActive: true,
+      sortIndex: 3,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ];
+
+  let bookingCounter = 0;
+  const bookings = new Map<number, { id: number; reference: string; userId: number }>();
+  const bookingItems = new Map<number, unknown[]>();
+
+  return {
+    ...actual,
+    getActiveCategoriesByIds: vi.fn(async (ids: number[]) =>
+      categories.filter(c => ids.includes(c.id)),
+    ),
+    generateUniqueReference: vi.fn(async () => {
+      bookingCounter += 1;
+      return `KNMP-TEST${String(bookingCounter).padStart(4, "0")}`;
+    }),
+    createBooking: vi.fn(async (data: { reference: string; userId: number }) => {
+      const id = bookingCounter + 100;
+      bookings.set(id, { id, reference: data.reference, userId: data.userId });
+      bookingItems.set(id, []);
+      return id;
+    }),
+    createBookingItem: vi.fn(async (data: { bookingId: number }) => {
+      const items = bookingItems.get(data.bookingId) ?? [];
+      items.push(data);
+      bookingItems.set(data.bookingId, items);
+    }),
+    getBookingById: vi.fn(async (id: number) => bookings.get(id)),
+    getMyBookings: vi.fn(async (userId: number) =>
+      [...bookings.values()].filter(b => b.userId === userId),
+    ),
+    cancelOwnBooking: vi.fn(async (id: number, userId: number) => {
+      const b = bookings.get(id);
+      if (b && b.userId === userId) b.reference = `${b.reference}:cancelled`;
+    }),
+    listActiveAttractions: vi.fn(async () => []),
+    searchAttractions: vi.fn(async () => []),
+    getAttractionBySlug: vi.fn(async () => undefined),
+    getAttractionById: vi.fn(async () => undefined),
+    listMyItinerary: vi.fn(async () => []),
+    listItineraryByDate: vi.fn(async () => []),
+    createItineraryItem: vi.fn(async () => 1),
+    updateItineraryItem: vi.fn(async () => undefined),
+    reorderItineraryItem: vi.fn(async () => undefined),
+    deleteItineraryItem: vi.fn(async () => undefined),
+    listAllAttractions: vi.fn(async () => []),
+    createAttraction: vi.fn(async () => 1),
+    updateAttraction: vi.fn(async () => undefined),
+    deleteAttraction: vi.fn(async () => undefined),
+    listAllCategories: vi.fn(async () => categories),
+    createCategory: vi.fn(async () => 1),
+    updateCategory: vi.fn(async () => undefined),
+    deleteCategory: vi.fn(async () => undefined),
+    listAllBookings: vi.fn(async () => [...bookings.values()]),
+    getBookingItemsByBookingId: vi.fn(async (bookingId: number) => bookingItems.get(bookingId) ?? []),
+    updateBookingStatus: vi.fn(async () => undefined),
+    getBookingStats: vi.fn(async () => ({ total: 0, revenuePesewas: 0, upcoming: 0, cancelled: 0, totalVisitors: 0 })),
+    listActiveCategories: vi.fn(async () => categories),
+    getUpcomingMyBookings: vi.fn(async () => []),
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Context factories
+// ---------------------------------------------------------------------------
+type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
+
+function createBaseContext(overrides: Partial<TrpcContext> = {}): TrpcContext {
+  return {
+    user: null,
+    req: { protocol: "https", headers: {} } as TrpcContext["req"],
+    res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
+    ...overrides,
+  };
+}
+
+let userSeq = 0;
+
+function createAuthContext(role: "user" | "admin" = "user"): TrpcContext {
+  userSeq += 1;
+  const user: AuthenticatedUser = {
+    id: userSeq,
+    openId: `test-${role}-${userSeq}`,
+    email: `test-${userSeq}@example.com`,
+    name: "Test User",
+    loginMethod: "manus",
+    role,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    lastSignedIn: new Date(),
+  };
+  return createBaseContext({ user });
+}
+
+function tomorrow(): Date {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 1);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+describe("categories.list (public)", () => {
+  it("returns active visitor categories without auth", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    const cats = await caller.categories.list();
+    expect(cats).toHaveLength(4);
+    expect(cats.map(c => c.slug)).toContain("child");
+  });
+});
+
+describe("bookings.calculateCost", () => {
+  it("computes totals correctly from category prices and quantities", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    const result = await caller.bookings.calculateCost({
+      lines: [
+        { categoryId: 1, quantity: 2 }, // 25.00 * 2 = 50.00
+        { categoryId: 2, quantity: 3 }, // 5.00 * 3 = 15.00
+        { categoryId: 4, quantity: 1 }, // 100.00 * 1 = 100.00
+      ],
+    });
+    expect(result.totalPesewas).toBe(16500); // GHS 165.00
+    expect(result.totalVisitors).toBe(6);
+    expect(result.items).toHaveLength(3);
+    expect(result.items[2]?.subtotalPesewas).toBe(10000);
+  });
+
+  it("rejects empty line items", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    await expect(caller.bookings.calculateCost({ lines: [] })).rejects.toThrow(
+      /at least one/i,
+    );
+  });
+
+  it("rejects inactive or invalid categories", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    await expect(
+      caller.bookings.calculateCost({ lines: [{ categoryId: 99, quantity: 1 }] }),
+    ).rejects.toThrow(/invalid or inactive/i);
+  });
+});
+
+describe("bookings.create (protected)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("requires authentication", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    await expect(
+      caller.bookings.create({
+        visitDate: tomorrow(),
+        lines: [{ categoryId: 1, quantity: 2 }],
+        visitorName: "Test",
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("creates a booking with a unique auto-generated reference", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const result = await caller.bookings.create({
+      visitDate: tomorrow(),
+      lines: [
+        { categoryId: 1, quantity: 2 },
+        { categoryId: 2, quantity: 1 },
+      ],
+      visitorName: "Test Visitor",
+      contactEmail: "test@example.com",
+    });
+    expect(result.reference).toMatch(/^KNMP-[A-Z0-9]+$/);
+    expect(result.id).toBeGreaterThan(0);
+  });
+
+  it("rejects past visit dates", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const yesterday = new Date();
+    yesterday.setUTCDate(yesterday.getUTCDate() - 2);
+    await expect(
+      caller.bookings.create({
+        visitDate: yesterday,
+        lines: [{ categoryId: 1, quantity: 1 }],
+      }),
+    ).rejects.toThrow(/visit date/i);
+  });
+});
+
+describe("bookings.mineById (owner only)", () => {
+  it("returns undefined for bookings belonging to another user", async () => {
+    const adminCaller = appRouter.createCaller(createAuthContext("admin"));
+    const result = await adminCaller.bookings.create({
+      visitDate: tomorrow(),
+      lines: [{ categoryId: 3, quantity: 1 }],
+    });
+    const otherCaller = appRouter.createCaller(createAuthContext("user"));
+    const lookup = await otherCaller.bookings.mineById({ id: result.id });
+    expect(lookup).toBeUndefined();
+  });
+
+  it("returns the booking with line items for the owner", async () => {
+    const ownerCaller = appRouter.createCaller(createAuthContext("admin"));
+    const result = await ownerCaller.bookings.create({
+      visitDate: tomorrow(),
+      lines: [{ categoryId: 3, quantity: 2 }],
+    });
+    const lookup = await ownerCaller.bookings.mineById({ id: result.id });
+    expect(lookup).not.toBeUndefined();
+    expect(lookup?.booking.reference).toBe(result.reference);
+    expect(lookup?.items).toHaveLength(1);
+    expect(lookup?.items[0]?.quantity).toBe(2);
+  });
+});
+
+describe("bookings.cancel (owner only)", () => {
+  it("only cancels the caller's own booking", async () => {
+    const db = await import("./db");
+    const ownerCaller = appRouter.createCaller(createAuthContext("admin"));
+    const created = await ownerCaller.bookings.create({
+      visitDate: tomorrow(),
+      lines: [{ categoryId: 1, quantity: 1 }],
+    });
+    const otherCaller = appRouter.createCaller(createAuthContext("user"));
+    await otherCaller.bookings.cancel({ id: created.id });
+    // cancelOwnBooking should not have mutated another user's booking marker
+    const after = await ownerCaller.bookings.mineById({ id: created.id });
+    expect((after?.booking as { reference: string }).reference).not.toContain("cancelled");
+    expect(db.cancelOwnBooking).toHaveBeenCalled();
+  });
+});
+
+describe("admin procedure gating", () => {
+  it("rejects non-admin users from admin endpoints", async () => {
+    const userCaller = appRouter.createCaller(createAuthContext("user"));
+    await expect(userCaller.attractions.listAll()).rejects.toThrow();
+    await expect(userCaller.categories.listAll()).rejects.toThrow();
+    await expect(userCaller.bookings.listAll()).rejects.toThrow();
+    await expect(userCaller.bookings.stats()).rejects.toThrow();
+  });
+
+  it("allows admins", async () => {
+    const adminCaller = appRouter.createCaller(createAuthContext("admin"));
+    const stats = await adminCaller.bookings.stats();
+    expect(stats).toHaveProperty("total");
+  });
+});
+
+describe("itineraries protection", () => {
+  it("rejects unauthenticated itinerary access", async () => {
+    const caller = appRouter.createCaller(createBaseContext());
+    await expect(caller.itineraries.list()).rejects.toThrow();
+  });
+
+  it("lists itinerary items for authenticated users", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const items = await caller.itineraries.list();
+    expect(Array.isArray(items)).toBe(true);
+  });
+});

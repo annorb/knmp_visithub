@@ -1,17 +1,20 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import {
+  bigint,
+  boolean,
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+} from "drizzle-orm/mysql-core";
 
 /**
- * Core user table backing auth flow.
- * Extend this file with additional tables as your product grows.
- * Columns use camelCase to match both database fields and generated types.
+ * Core user table backing auth flow (Manus OAuth).
  */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -25,4 +28,109 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+/**
+ * Attractions within the Kwame Nkrumah Memorial Park.
+ */
+export const attractions = mysqlTable("attractions", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  slug: varchar("slug", { length: 200 }).notNull().unique(),
+  description: text("description").notNull(),
+  imageUrl: text("imageUrl"),
+  openingHours: varchar("openingHours", { length: 200 }),
+  location: varchar("location", { length: 200 }),
+  averageVisitDurationMin: int("averageVisitDurationMin").default(30),
+  sortIndex: int("sortIndex").default(0),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Attraction = typeof attractions.$inferSelect;
+export type InsertAttraction = typeof attractions.$inferInsert;
+
+/**
+ * Visitor categories with per-category entrance fees (in GHS).
+ * Examples: Adult, Child, Student, Foreigner (Non-Ghanaian Adult).
+ */
+export const visitorCategories = mysqlTable("visitor_categories", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  slug: varchar("slug", { length: 100 }).notNull().unique(),
+  /** Entrance fee in Ghana Cedis (GHS), stored as integer pesewas to avoid float issues. */
+  pricePesewas: int("pricePesewas").notNull(),
+  /** Short human description, e.g. "Ages 13 and above" */
+  description: text("description"),
+  isActive: boolean("isActive").default(true).notNull(),
+  sortIndex: int("sortIndex").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VisitorCategory = typeof visitorCategories.$inferSelect;
+export type InsertVisitorCategory = typeof visitorCategories.$inferInsert;
+
+/**
+ * Bookings created by visitors for a specific visit date.
+ */
+export const bookings = mysqlTable("bookings", {
+  id: int("id").autoincrement().primaryKey(),
+  /** Unique auto-generated reference, e.g. KNMP-X7B2Q4 */
+  reference: varchar("reference", { length: 32 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  visitDate: timestamp("visitDate").notNull(),
+  visitorName: varchar("visitorName", { length: 200 }),
+  contactEmail: varchar("contactEmail", { length: 320 }),
+  contactPhone: varchar("contactPhone", { length: 64 }),
+  totalPesewas: int("totalPesewas").notNull(),
+  status: mysqlEnum("status", ["pending", "confirmed", "cancelled"]).default("pending").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Booking = typeof bookings.$inferSelect;
+export type InsertBooking = typeof bookings.$inferInsert;
+
+/**
+ * Per-category line items within a booking (category + quantity).
+ */
+export const bookingItems = mysqlTable("booking_items", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("bookingId").notNull(),
+  categoryId: int("categoryId").notNull(),
+  categoryName: varchar("categoryName", { length: 100 }).notNull(),
+  /** Unit price in pesewas at the time of booking (snapshot). */
+  unitPricePesewas: int("unitPricePesewas").notNull(),
+  quantity: int("quantity").notNull(),
+  subtotalPesewas: int("subtotalPesewas").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BookingItem = typeof bookingItems.$inferSelect;
+export type InsertBookingItem = typeof bookingItems.$inferInsert;
+
+/**
+ * Personal itinerary items belonging to a user, tied to a visit date
+ * (optionally linked to a booking).
+ */
+export const itineraryItems = mysqlTable("itinerary_items", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  bookingId: int("bookingId"),
+  /** The visit date this itinerary belongs to (local date at midnight UTC). */
+  visitDate: timestamp("visitDate").notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description"),
+  /** Free-text time of day, e.g. "09:30" or "Morning" */
+  timeSlot: varchar("timeSlot", { length: 50 }),
+  /** Optional attraction this item relates to */
+  attractionId: int("attractionId"),
+  attractionName: varchar("attractionName", { length: 200 }),
+  sortIndex: int("sortIndex").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ItineraryItem = typeof itineraryItems.$inferSelect;
+export type InsertItineraryItem = typeof itineraryItems.$inferInsert;
