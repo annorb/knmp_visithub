@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useMemo } from "react";
 import { format } from "date-fns";
 import { Eye, Loader2 } from "lucide-react";
 import { useState } from "react";
@@ -37,6 +38,7 @@ type BookingRow = {
   userId: number;
   userName: string | null;
   visitDate: Date;
+  visitEndDate: Date | null;
   visitorName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -71,6 +73,12 @@ export default function AdminBookings() {
     { id: selectedId ?? 0 },
     { enabled: selectedId !== null },
   );
+  const { data: tourSlots } = trpc.tours.list.useQuery();
+  const slotTimes = useMemo(() => {
+    const map = new Map<number, { start: string; end: string }>();
+    for (const s of tourSlots ?? []) map.set(s.id, { start: s.startTime, end: s.endTime });
+    return map;
+  }, [tourSlots]);
 
   if (!isAuthenticated || !user) {
     return (
@@ -124,7 +132,7 @@ export default function AdminBookings() {
                     <TableHead>Reference</TableHead>
                     <TableHead>Visitor</TableHead>
                     <TableHead>Contact</TableHead>
-                    <TableHead>Visit date</TableHead>
+                    <TableHead>Visit dates</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-10"></TableHead>
@@ -148,7 +156,14 @@ export default function AdminBookings() {
                           {row.contactEmail ?? row.contactPhone ?? "—"}
                         </TableCell>
                         <TableCell>
-                          {format(new Date(row.visitDate), "d MMM yyyy")}
+                          {(() => {
+                            const start = new Date(row.visitDate);
+                            const end = row.visitEndDate ? new Date(row.visitEndDate) : null;
+                            const multi = end && end.getTime() !== start.getTime();
+                            return multi
+                              ? `${format(start, "d MMM")} – ${format(end!, "d MMM yyyy")}`
+                              : format(start, "d MMM yyyy");
+                          })()}
                         </TableCell>
                         <TableCell className="text-right font-medium">
                           {formatPrice(row.totalPesewas)}
@@ -185,7 +200,14 @@ export default function AdminBookings() {
                   {selected.reference}
                 </DialogTitle>
                 <DialogDescription>
-                  {format(new Date(selected.visitDate), "EEEE, d MMMM yyyy")}
+                  {(() => {
+                    const start = new Date(selected.visitDate);
+                    const end = selected.visitEndDate ? new Date(selected.visitEndDate) : null;
+                    const multi = end && end.getTime() !== start.getTime();
+                    return multi
+                      ? `${format(start, "EEEE, d MMMM yyyy")} – ${format(end!, "EEEE, d MMMM yyyy")} (multi-day)`
+                      : format(start, "EEEE, d MMMM yyyy");
+                  })()}
                 </DialogDescription>
               </DialogHeader>
             )}
@@ -212,6 +234,24 @@ export default function AdminBookings() {
                 <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
                 <p className="text-muted-foreground">{selected?.notes ?? "—"}</p>
               </div>
+              {detail?.slots?.length ? (
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">
+                    Guided tour slots
+                  </p>
+                  <div className="space-y-1.5">
+                    {detail.slots.map(slot => (
+                      <div key={slot.id} className="flex justify-between rounded bg-accent px-3 py-1.5">
+                        <span>{slot.attractionName ?? "Guided tour"}</span>
+                        <span className="font-medium text-muted-foreground">
+                          {format(new Date(slot.visitDate), "d MMM yyyy")} ·{" "}
+                          {slotTimes.get(slot.slotId)?.start ?? ""} – {slotTimes.get(slot.slotId)?.end ?? ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {detail?.items?.length ? (
                 <div>
                   <p className="text-xs uppercase tracking-wider text-muted-foreground mb-1">

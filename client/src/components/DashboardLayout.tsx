@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { startLogin } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { CalendarDays, Landmark, LayoutDashboard, LogOut, PanelLeft, Tags } from "lucide-react";
+import { CalendarDays, Landmark, LayoutDashboard, LineChart, LogOut, PanelLeft, Tags } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -32,6 +32,7 @@ const menuItems = [
   { icon: Landmark, label: "Attractions", path: "/admin/attractions" },
   { icon: Tags, label: "Visitor Categories", path: "/admin/categories" },
   { icon: CalendarDays, label: "Bookings", path: "/admin/bookings" },
+  { icon: LineChart, label: "Analytics", path: "/admin/analytics" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";

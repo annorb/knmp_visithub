@@ -8,6 +8,7 @@ import {
   createAttraction,
   createBooking,
   createBookingItem,
+  createBookingSlot,
   createCategory,
   createItineraryItem,
   deleteAttraction,
@@ -19,7 +20,10 @@ import {
   getAttractionBySlug,
   getBookingById,
   getBookingItemsByBookingId,
+  getBookingSlotsByBookingId,
   getBookingStats,
+  getCategoryBreakdown,
+  getMonthlyTrends,
   getMyBookings,
   getUpcomingMyBookings,
   listActiveAttractions,
@@ -27,6 +31,7 @@ import {
   listAllAttractions,
   listAllBookings,
   listAllCategories,
+  listActiveTourSlots,
   listItineraryByDate,
   listMyItinerary,
   reorderItineraryItem,
@@ -36,6 +41,7 @@ import {
   updateCategory,
   updateItineraryItem,
 } from "./db";
+import { buildTicketPdfBuffer, type TicketData } from "./ticketPdf";
 import type { InsertAttraction, InsertVisitorCategory } from "../drizzle/schema";
 
 const slugify = (s: string) =>
@@ -200,9 +206,11 @@ export const appRouter = router({
       .input(
         z.object({
           visitDate: z.date(),
+          visitEndDate: z.date().optional(),
           lines: z.array(
             z.object({ categoryId: z.number().int().positive(), quantity: z.number().int().min(1).max(100) }),
           ),
+          slotIds: z.array(z.number().int().positive()).max(20).optional(),
           visitorName: z.string().max(200).optional(),
           contactEmail: z.string().email().max(320).optional(),
           contactPhone: z.string().max(64).optional(),
@@ -218,6 +226,13 @@ export const appRouter = router({
         const visit = input.visitDate;
         if (dateOnly(visit) < dateOnly(now)) {
           throw new Error("The visit date must be today or later");
+        }
+        const endDate = input.visitEndDate ? dateOnly(input.visitEndDate) : undefined;
+        if (endDate && endDate < dateOnly(visit)) {
+          throw new Error("The end date must not be earlier than the start date");
+        }
+        if (endDate && endDate.getTime() - dateOnly(visit).getTime() > 30 * 24 * 60 * 60 * 1000) {
+          throw new Error("A single booking may not span more than 30 days");
         }
         const ids = input.lines.map(l => l.categoryId);
         const categories = await getActiveCategoriesByIds(ids);
@@ -235,6 +250,7 @@ export const appRouter = router({
           userId: ctx.user.id,
           reference,
           visitDate: dateOnly(input.visitDate),
+          visitEndDate: endDate ?? null,
           visitorName: input.visitorName,
           contactEmail: input.contactEmail,
           contactPhone: input.contactPhone,
@@ -244,6 +260,22 @@ export const appRouter = router({
         });
         for (const item of items) {
           await createBookingItem({ bookingId, ...item });
+        }
+        if (input.slotIds && input.slotIds.length > 0) {
+          const allSlots = await listActiveTourSlots();
+          const slotMap = new Map(allSlots.map(s => [s.id, s]));
+          for (const slotId of input.slotIds) {
+            const slot = slotMap.get(slotId);
+            if (!slot) throw new Error(`Tour slot ${slotId} is no longer available`);
+            const attraction = await getAttractionById(slot.attractionId);
+            await createBookingSlot({
+              bookingId,
+              slotId,
+              attractionId: slot.attractionId,
+              attractionName: attraction?.name,
+              visitDate: dateOnly(input.visitDate),
+            });
+          }
         }
         return { id: bookingId, reference };
       }),
@@ -276,7 +308,8 @@ export const appRouter = router({
         if (!booking) return undefined;
         if (booking.userId !== ctx.user.id) return undefined;
         const items = await getBookingItemsByBookingId(booking.id);
-        return { booking, items };
+        const slots = await getBookingSlotsByBookingId(booking.id);
+        return { booking, items, slots };
       }),
 
     cancel: protectedProcedure
@@ -294,7 +327,8 @@ export const appRouter = router({
         const booking = await getBookingById(input.id);
         if (!booking) return undefined;
         const items = await getBookingItemsByBookingId(booking.id);
-        return { booking, items };
+        const slots = await getBookingSlotsByBookingId(booking.id);
+        return { booking, items, slots };
       }),
     setStatus: adminProcedure
       .input(z.object({ id: z.number().int().positive(), status: z.enum(["pending", "confirmed", "cancelled"]) }))
@@ -303,6 +337,61 @@ export const appRouter = router({
         return { success: true } as const;
       }),
     stats: adminProcedure.query(() => getBookingStats()),
+  }),
+
+  /** Public guided-tour time slots per attraction. */
+  tours: router({
+    list: publicProcedure.query(() => listActiveTourSlots()),
+  }),
+
+  /** PDF entry ticket for a booking (owner or admin access). */
+  ticket: protectedProcedure
+    .input(z.object({ id: z.number().int().positive() }))
+    .mutation(async ({ ctx, input }) => {
+      const booking = await getBookingById(input.id);
+      if (!booking) throw new Error("Booking not found");
+      if (booking.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        throw new Error("You can only download tickets for your own bookings");
+      }
+      const [items, slots, allSlots] = await Promise.all([
+        getBookingItemsByBookingId(booking.id),
+        getBookingSlotsByBookingId(booking.id),
+        listActiveTourSlots(),
+      ]);
+      const labelMap = new Map(allSlots.map(s => [`${s.attractionId}-${s.startTime}`, s.label ?? ""]));
+      const data: TicketData = {
+        reference: booking.reference,
+        visitorName: booking.visitorName,
+        contactEmail: booking.contactEmail,
+        contactPhone: booking.contactPhone,
+        visitDate: booking.visitDate,
+        visitEndDate: booking.visitEndDate,
+        totalPesewas: booking.totalPesewas,
+        totalVisitors: items.reduce((sum, i) => sum + i.quantity, 0),
+        status: booking.status,
+        items,
+        slots: slots.map(s => ({
+          attractionId: s.attractionId,
+          attractionName: s.attractionName,
+          startTime: allSlots.find(a => a.id === s.slotId)?.startTime ?? "",
+          endTime: allSlots.find(a => a.id === s.slotId)?.endTime ?? "",
+          label: allSlots.find(a => a.id === s.slotId)?.label,
+          visitDate: s.visitDate,
+        })),
+      };
+      const buffer = await buildTicketPdfBuffer(data, labelMap);
+      return {
+        base64: buffer.toString("base64"),
+        filename: `KNMP-ticket-${booking.reference}.pdf`,
+      };
+    }),
+
+  /** Admin analytics: category breakdown and monthly revenue trends. */
+  analytics: router({
+    categoryBreakdown: adminProcedure.query(() => getCategoryBreakdown()),
+    monthlyTrends: adminProcedure
+      .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
+      .query(({ input }) => getMonthlyTrends(input?.months ?? 6)),
   }),
 
   itineraries: router({

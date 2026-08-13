@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -22,6 +23,7 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  Clock,
   Landmark,
   Minus,
   Plus,
@@ -41,8 +43,11 @@ export default function Book() {
   const { user, isAuthenticated } = useAuth();
   const utils = trpc.useUtils();
   const { data: categories, isLoading: catsLoading } = trpc.categories.list.useQuery();
+  const { data: tourSlots } = trpc.tours.list.useQuery();
 
   const [visitDate, setVisitDate] = useState<Date | undefined>(undefined);
+  const [visitEndDate, setVisitEndDate] = useState<Date | undefined>(undefined);
+  const [selectedSlots, setSelectedSlots] = useState<number[]>([]);
   const [quantities, setQuantities] = useState<QtyMap>({});
   const [visitorName, setVisitorName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -58,10 +63,13 @@ export default function Book() {
   });
 
   const [confirmed, setConfirmed] = useState<{
+    id: number;
     reference: string;
     total: number;
     visitors: number;
   } | null>(null);
+
+  const ticketMutation = trpc.ticket.useMutation();
 
   const setQty = (categoryId: number, delta: number) => {
     setError(null);
@@ -103,6 +111,10 @@ export default function Book() {
       setError("Please select a visit date.");
       return;
     }
+    if (visitEndDate && visitEndDate < visitDate) {
+      setError("The end date must not be earlier than the start date.");
+      return;
+    }
     if (lines.length === 0) {
       setError("Please select at least one visitor category.");
       return;
@@ -110,13 +122,15 @@ export default function Book() {
     try {
       const result = await createMutation.mutateAsync({
         visitDate,
+        visitEndDate: visitEndDate && visitEndDate.getTime() !== visitDate.getTime() ? visitEndDate : undefined,
+        slotIds: selectedSlots.length > 0 ? selectedSlots : undefined,
         lines,
         visitorName: visitorName || user?.name || undefined,
         contactEmail: contactEmail || user?.email || undefined,
         contactPhone: contactPhone || undefined,
         notes: notes || undefined,
       });
-      setConfirmed({ reference: result.reference, total: cost?.totalPesewas ?? liveTotal, visitors: totalVisitors });
+      setConfirmed({ id: result.id, reference: result.reference, total: cost?.totalPesewas ?? liveTotal, visitors: totalVisitors });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     }
@@ -142,10 +156,12 @@ export default function Book() {
               <p className="font-display text-3xl md:text-4xl font-semibold tracking-wide text-heritage mb-4">
                 {confirmed.reference}
               </p>
-              <div className="flex justify-center gap-8 text-sm text-muted-foreground">
+              <div className="flex justify-center gap-8 text-sm text-muted-foreground flex-wrap">
                 <span className="flex items-center gap-1.5">
                   <CalendarDays className="h-4 w-4" />
-                  {format(visitDate!, "EEEE, d MMM yyyy")}
+                  {visitEndDate && visitEndDate.getTime() !== visitDate!.getTime()
+                    ? `${format(visitDate!, "d MMM yyyy")} – ${format(visitEndDate, "d MMM yyyy")}`
+                    : format(visitDate!, "EEEE, d MMM yyyy")}
                 </span>
                 <span className="flex items-center gap-1.5">
                   <Landmark className="h-4 w-4" />
@@ -158,9 +174,26 @@ export default function Book() {
             </CardContent>
           </Card>
           <div className="flex flex-wrap justify-center gap-3">
+            <Button
+              size="lg"
+              onClick={async () => {
+                try {
+                  const { base64, filename } = await ticketMutation.mutateAsync({ id: confirmed.id });
+                  const link = document.createElement("a");
+                  link.href = `data:application/pdf;base64,${base64}`;
+                  link.download = filename;
+                  link.click();
+                } catch {
+                  setError("Could not generate the ticket — please try from My Bookings.");
+                }
+              }}
+              disabled={ticketMutation.isPending}
+            >
+              <Ticket className="mr-2 h-4.5 w-4.5" />
+              {ticketMutation.isPending ? "Generating…" : "Download entry ticket (PDF)"}
+            </Button>
             <Link href="/bookings">
-              <Button size="lg">
-                <Ticket className="mr-2 h-4.5 w-4.5" />
+              <Button size="lg" variant="outline">
                 View my bookings
               </Button>
             </Link>
@@ -203,7 +236,8 @@ export default function Book() {
                 <span className="text-gold mr-2">1</span>Choose a visit date
               </CardTitle>
               <CardDescription>
-                The park is open Monday–Saturday 9am–7pm and Sundays 10am–7pm.
+                The park is open Monday–Saturday 9am–7pm and Sundays 10am–7pm. Booking
+                a second date turns your visit into a multi-day experience.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -237,10 +271,62 @@ export default function Book() {
                 {visitDate && (
                   <Badge variant="secondary" className="gap-1.5 px-3 py-1">
                     <Check className="h-3.5 w-3.5 text-heritage" />
-                    {format(visitDate, "EEE, d MMM yyyy")}
+                    {visitEndDate && visitEndDate.getTime() !== visitDate.getTime()
+                      ? `${format(visitDate, "d MMM")} – ${format(visitEndDate, "d MMM yyyy")}`
+                      : format(visitDate, "EEE, d MMM yyyy")}
                   </Badge>
                 )}
               </div>
+              {visitDate && (
+                <div className="mt-5 pt-5 border-t border-border space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="multi-day"
+                      checked={Boolean(visitEndDate)}
+                      onCheckedChange={checked => {
+                        setVisitEndDate(checked ? visitDate : undefined);
+                        setError(null);
+                      }}
+                    />
+                    <Label htmlFor="multi-day" className="text-sm">
+                      Make this a multi-day visit
+                    </Label>
+                  </div>
+                  {visitEndDate && (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "h-12 justify-start text-left font-normal w-full sm:w-64 bg-card",
+                            !visitEndDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarDays className="mr-2 h-4.5 w-4.5 text-heritage" />
+                          {format(visitEndDate, "EEEE, d MMMM yyyy")}
+                          <span className="ml-auto text-xs text-muted-foreground">end date</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={visitEndDate}
+                          onSelect={date => {
+                            setVisitEndDate(date);
+                            setError(null);
+                          }}
+                          disabled={date =>
+                            date < new Date(new Date().setHours(0, 0, 0, 0)) ||
+                            date < visitDate ||
+                            date.getTime() - visitDate.getTime() > 30 * 24 * 60 * 60 * 1000
+                          }
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -310,11 +396,70 @@ export default function Book() {
             </CardContent>
           </Card>
 
-          {/* Step 3: Contact details */}
+          {/* Step 3: Guided tour slots */}
+          {/* (numbering kept; contact details step is 4) */}
           <Card>
             <CardHeader>
               <CardTitle className="font-display text-2xl">
-                <span className="text-gold mr-2">3</span>Your details
+                <span className="text-gold mr-2">3</span>Guided tour time slots
+              </CardTitle>
+              <CardDescription>
+                Optional — reserve guided-tour slots at any attraction. Group size is
+                limited to 25 visitors per slot.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!tourSlots || tourSlots.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No guided-tour slots are currently available.
+                </p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {tourSlots.map(slot => {
+                    const checked = selectedSlots.includes(slot.id);
+                    return (
+                      <label
+                        key={slot.id}
+                        htmlFor={`slot-${slot.id}`}
+                        className={cn(
+                          "flex items-start gap-3 rounded-lg border px-3.5 py-3 cursor-pointer transition-colors",
+                          checked
+                            ? "border-heritage bg-accent/60"
+                            : "border-border bg-card hover:border-gold/50",
+                        )}
+                      >
+                        <Checkbox
+                          id={`slot-${slot.id}`}
+                          checked={checked}
+                          onCheckedChange={c => {
+                            setSelectedSlots(prev =>
+                              c ? [...prev, slot.id] : prev.filter(i => i !== slot.id),
+                            );
+                            setError(null);
+                          }}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium leading-snug">
+                            {slot.attractionName ?? "Guided tour"}
+                          </p>
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Clock className="h-3 w-3" />
+                            {slot.label ?? `${slot.startTime} – ${slot.endTime}`}
+                          </p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Step 4: Contact details */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="font-display text-2xl">
+                <span className="text-gold mr-2">4</span>Your details
               </CardTitle>
               <CardDescription>
                 Optional — we prefill from your account when you are signed in.
@@ -376,10 +521,16 @@ export default function Book() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground flex items-center gap-2">
                     <CalendarDays className="h-4 w-4" />
-                    Visit date
+                    {visitEndDate && visitEndDate.getTime() !== visitDate?.getTime()
+                      ? "Visit dates"
+                      : "Visit date"}
                   </span>
                   <span className="font-medium">
-                    {visitDate ? format(visitDate, "d MMM yyyy") : "—"}
+                    {visitDate
+                      ? visitEndDate && visitEndDate.getTime() !== visitDate.getTime()
+                        ? `${format(visitDate, "d MMM")} – ${format(visitEndDate, "d MMM yyyy")}`
+                        : format(visitDate, "d MMM yyyy")
+                      : "—"}
                   </span>
                 </div>
                 {Object.entries(quantities).length === 0 ? (
@@ -408,6 +559,12 @@ export default function Book() {
                       <span>Total visitors</span>
                       <span>{totalVisitors}</span>
                     </div>
+                    {selectedSlots.length > 0 && (
+                      <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
+                        <span>Guided tours selected</span>
+                        <span>{selectedSlots.length}</span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between pt-1 font-display text-xl text-heritage">
                       <span>Estimated total</span>
                       <span>

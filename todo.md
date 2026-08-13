@@ -35,3 +35,12 @@
 - [x] Vitest tests (15 passing) for booking reference uniqueness, cost calc, auth gating
 - [x] Visual verification via screenshots, responsive check
 - [x] Checkpoint and deliver
+
+## Enhancement Round 1 (user request)
+- [x] DB schema: multi-day bookings (visitEndDate on booking), tour_slots + booking_slots tables
+- [x] Backend: date-range booking creation and validation, slot attachment, analytics endpoints, PDF endpoint
+- [x] PDF ticket generation on successful booking + download endpoint (server-side pdfkit), embedded reference + category breakdown + total + slots
+- [x] Frontend booking flow: date range picker (multi-day checkbox + end date), guided-tour slot selection grid
+- [x] PDF ticket download UI on booking confirmation and My Bookings
+- [x] Admin analytics page: KPIs, visitor-category breakdown, monthly revenue trend chart; nav entry + route
+- [x] Tests (22 passing incl. multi-day validation & slots) + visual verification + checkpoint

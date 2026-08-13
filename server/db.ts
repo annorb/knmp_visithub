@@ -1,16 +1,20 @@
-import { and, desc, eq, gt, like, sql } from "drizzle-orm";
+import { and, desc, eq, gt, like, lte, sql, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   attractions,
   bookings,
   bookingItems,
   itineraryItems,
+  tourSlots,
+  bookingSlots,
   users,
   visitorCategories,
   type InsertAttraction,
   type InsertBooking,
   type InsertBookingItem,
+  type InsertBookingSlot,
   type InsertItineraryItem,
+  type InsertTourSlot,
   type InsertUser,
   type InsertVisitorCategory,
 } from "../drizzle/schema";
@@ -420,4 +424,113 @@ export async function reorderItineraryItem(id: number, userId: number, sortIndex
     .update(itineraryItems)
     .set({ sortIndex })
     .where(and(eq(itineraryItems.id, id), eq(itineraryItems.userId, userId)));
+}
+
+// ---------------------------------------------------------------------------
+// Tour slots
+// ---------------------------------------------------------------------------
+export async function listActiveTourSlots() {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      id: tourSlots.id,
+      attractionId: tourSlots.attractionId,
+      attractionName: attractions.name,
+      startTime: tourSlots.startTime,
+      endTime: tourSlots.endTime,
+      label: tourSlots.label,
+      maxCapacity: tourSlots.maxCapacity,
+      bookedCount: tourSlots.bookedCount,
+      isActive: tourSlots.isActive,
+      createdAt: tourSlots.createdAt,
+    })
+    .from(tourSlots)
+    .innerJoin(attractions, eq(tourSlots.attractionId, attractions.id))
+    .where(eq(tourSlots.isActive, true))
+    .orderBy(tourSlots.attractionId, tourSlots.startTime);
+  return rows.map(row => ({
+    ...row,
+    attractionName: row.attractionName,
+  }));
+}
+
+export async function getTourSlotsByAttraction(attractionId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(tourSlots)
+    .where(and(eq(tourSlots.attractionId, attractionId), eq(tourSlots.isActive, true)))
+    .orderBy(tourSlots.startTime);
+}
+
+export async function createTourSlot(data: InsertTourSlot) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const result = await db.insert(tourSlots).values(data);
+  return result[0].insertId;
+}
+
+export async function deleteTourSlot(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.delete(tourSlots).where(eq(tourSlots.id, id));
+}
+
+export async function createBookingSlot(data: InsertBookingSlot) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.insert(bookingSlots).values(data);
+}
+
+export async function getBookingSlotsByBookingId(bookingId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(bookingSlots).where(eq(bookingSlots.bookingId, bookingId));
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+/** Visitor-category breakdown: non-cancelled bookings. */
+export async function getCategoryBreakdown() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      categoryId: bookingItems.categoryId,
+      categoryName: bookingItems.categoryName,
+      visitors: sql<number>`coalesce(sum(${bookingItems.quantity}), 0)`,
+      revenuePesewas: sql<number>`coalesce(sum(${bookingItems.subtotalPesewas}), 0)`,
+    })
+    .from(bookingItems)
+    .innerJoin(bookings, eq(bookingItems.bookingId, bookings.id))
+    .where(sql`${bookings.status} != 'cancelled'`)
+    .groupBy(bookingItems.categoryId, bookingItems.categoryName)
+    .orderBy(sql`revenuePesewas DESC`);
+}
+
+/** Monthly revenue & booking trends for the last N months (UTC calendar months). */
+export async function getMonthlyTrends(months = 6) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db
+    .select({
+      month: sql<string>`date_format(${bookings.createdAt}, '%Y-%m')`,
+      bookings: sql<number>`count(*)`,
+      revenuePesewas: sql<number>`coalesce(sum(${bookings.totalPesewas}), 0)`,
+      visitors: sql<number>`coalesce(sum(${bookingItems.quantity}), 0)`,
+    })
+    .from(bookings)
+    .leftJoin(bookingItems, eq(bookings.id, bookingItems.bookingId))
+    .where(
+      and(
+        sql`${bookings.status} != 'cancelled'`,
+        gt(bookings.createdAt, sql`date_sub(now(), interval ${months} month)`),
+      ),
+    )
+    .groupBy(sql`date_format(${bookings.createdAt}, '%Y-%m')`)
+    .orderBy(sql`month ASC`);
+  return rows;
 }

@@ -79,6 +79,8 @@ export const bookings = mysqlTable("bookings", {
   reference: varchar("reference", { length: 32 }).notNull().unique(),
   userId: int("userId").notNull(),
   visitDate: timestamp("visitDate").notNull(),
+  /** End date for multi-day bookings (same as visitDate for single-day visits). */
+  visitEndDate: timestamp("visitEndDate"),
   visitorName: varchar("visitorName", { length: 200 }),
   contactEmail: varchar("contactEmail", { length: 320 }),
   contactPhone: varchar("contactPhone", { length: 64 }),
@@ -106,6 +108,45 @@ export const bookingItems = mysqlTable("booking_items", {
   subtotalPesewas: int("subtotalPesewas").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+/**
+ * Guided-tour time slots offered per attraction on a given day.
+ */
+export const tourSlots = mysqlTable("tour_slots", {
+  id: int("id").autoincrement().primaryKey(),
+  attractionId: int("attractionId").notNull(),
+  /** e.g. "09:00", "11:30", "14:00" */
+  startTime: varchar("startTime", { length: 5 }).notNull(),
+  /** e.g. "09:45", "12:15", "14:45" */
+  endTime: varchar("endTime", { length: 5 }).notNull(),
+  label: varchar("label", { length: 100 }),
+  /** Maximum group size for the slot. */
+  maxCapacity: int("maxCapacity").default(25),
+  /** Bookings already attached to this slot today. */
+  bookedCount: int("bookedCount").default(0).notNull(),
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type TourSlot = typeof tourSlots.$inferSelect;
+export type InsertTourSlot = typeof tourSlots.$inferInsert;
+
+/**
+ * Which tour slot(s) a booking's visitors are booked into, per attraction.
+ */
+export const bookingSlots = mysqlTable("booking_slots", {
+  id: int("id").autoincrement().primaryKey(),
+  bookingId: int("bookingId").notNull(),
+  slotId: int("slotId").notNull(),
+  attractionId: int("attractionId").notNull(),
+  attractionName: varchar("attractionName", { length: 200 }),
+  /** The day within a multi-day booking this slot applies to (local date). */
+  visitDate: timestamp("visitDate").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BookingSlot = typeof bookingSlots.$inferSelect;
+export type InsertBookingSlot = typeof bookingSlots.$inferInsert;
 
 export type BookingItem = typeof bookingItems.$inferSelect;
 export type InsertBookingItem = typeof bookingItems.$inferInsert;

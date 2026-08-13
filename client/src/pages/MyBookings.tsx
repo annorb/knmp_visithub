@@ -16,7 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { startLogin } from "@/const";
 import {
   AlertCircle,
@@ -40,10 +40,19 @@ const statusStyles: Record<string, "secondary" | "default" | "destructive"> = {
   cancelled: "destructive",
 };
 
+function downloadTicket(base64: string, filename: string) {
+  const link = document.createElement("a");
+  link.href = `data:application/pdf;base64,${base64}`;
+  link.download = filename;
+  link.click();
+}
+
 export default function MyBookings() {
   const { user, isAuthenticated, loading } = useAuth();
   const utils = trpc.useUtils();
   const { data: bookings, isLoading } = trpc.bookings.myBookings.useQuery();
+  const ticketMutation = trpc.ticket.useMutation();
+  const [downloading, setDownloading] = useState<number | null>(null);
   const { data: bookingsDetail } = trpc.bookings.myBookingsDetail.useQuery(undefined, {
     enabled: isAuthenticated,
   });
@@ -168,7 +177,14 @@ export default function MyBookings() {
                         <p className="text-sm text-muted-foreground mt-1.5 flex items-center gap-3 flex-wrap">
                           <span className="flex items-center gap-1.5">
                             <CalendarDays className="h-4 w-4 text-heritage" />
-                            {format(new Date(booking.visitDate), "EEEE, d MMMM yyyy")}
+                            {(() => {
+                              const start = new Date(booking.visitDate);
+                              const end = booking.visitEndDate ? new Date(booking.visitEndDate) : null;
+                              const multi = end && end.getTime() !== start.getTime();
+                              return multi
+                                ? `${format(start, "d MMM yyyy")} – ${format(end!, "d MMM yyyy")}`
+                                : format(start, "EEEE, d MMMM yyyy");
+                            })()}
                           </span>
                           <span className="flex items-center gap-1.5">
                             <Ticket className="h-4 w-4 text-heritage" />
@@ -180,6 +196,25 @@ export default function MyBookings() {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={downloading === booking.id || ticketMutation.isPending}
+                          onClick={async () => {
+                            setDownloading(booking.id);
+                            try {
+                              const { base64, filename } = await ticketMutation.mutateAsync({ id: booking.id });
+                              downloadTicket(base64, filename);
+                            } catch {
+                              // toast handled by sonner via onError below
+                            } finally {
+                              setDownloading(null);
+                            }
+                          }}
+                        >
+                          <Ticket className="mr-1.5 h-4 w-4" />
+                          {downloading === booking.id ? "Generating…" : "Download ticket"}
+                        </Button>
                         {booking.status !== "cancelled" && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>

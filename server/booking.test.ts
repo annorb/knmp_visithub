@@ -111,6 +111,10 @@ vi.mock("./db", async importOriginal => {
     getBookingStats: vi.fn(async () => ({ total: 0, revenuePesewas: 0, upcoming: 0, cancelled: 0, totalVisitors: 0 })),
     listActiveCategories: vi.fn(async () => categories),
     getUpcomingMyBookings: vi.fn(async () => []),
+    listActiveTourSlots: vi.fn(async () => []),
+    createBookingSlot: vi.fn(async () => undefined),
+    getCategoryBreakdown: vi.fn(async () => []),
+    getMonthlyTrends: vi.fn(async () => []),
   };
 });
 
@@ -308,5 +312,109 @@ describe("itineraries protection", () => {
     const caller = appRouter.createCaller(createAuthContext());
     const items = await caller.itineraries.list();
     expect(Array.isArray(items)).toBe(true);
+  });
+});
+
+describe("bookings.create multi-day & slots", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates a multi-day booking and persists the end date", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const start = tomorrow();
+    const end = new Date(start.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const result = await caller.bookings.create({
+      visitDate: start,
+      visitEndDate: end,
+      lines: [{ categoryId: 1, quantity: 2 }],
+    });
+    expect(result.id).toBeGreaterThan(0);
+    const db = await import("./db");
+    expect(db.createBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ visitEndDate: end }),
+    );
+  });
+
+  it("rejects an end date earlier than the start date", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const start = tomorrow();
+    const end = new Date(start.getTime() - 2 * 24 * 60 * 60 * 1000);
+    await expect(
+      caller.bookings.create({
+        visitDate: start,
+        visitEndDate: end,
+        lines: [{ categoryId: 1, quantity: 1 }],
+      }),
+    ).rejects.toThrow(/end date/i);
+  });
+
+  it("rejects bookings spanning more than 30 days", async () => {
+    const caller = appRouter.createCaller(createAuthContext());
+    const start = tomorrow();
+    const end = new Date(start.getTime() + 60 * 24 * 60 * 60 * 1000);
+    await expect(
+      caller.bookings.create({
+        visitDate: start,
+        visitEndDate: end,
+        lines: [{ categoryId: 1, quantity: 1 }],
+      }),
+    ).rejects.toThrow(/30 days/i);
+  });
+
+  it("attaches selected tour slots to the booking", async () => {
+    const db = await import("./db");
+    vi.mocked(db.listActiveTourSlots).mockResolvedValue([
+      {
+        id: 7,
+        attractionId: 2,
+        name: "Museum",
+        startTime: "10:00",
+        endTime: "10:45",
+        label: "Morning",
+        maxCapacity: 25,
+        bookedCount: 0,
+        isActive: true,
+        createdAt: new Date(),
+      },
+    ]);
+    const caller = appRouter.createCaller(createAuthContext());
+    const result = await caller.bookings.create({
+      visitDate: tomorrow(),
+      lines: [{ categoryId: 1, quantity: 1 }],
+      slotIds: [7],
+    });
+    // attractionName comes from getAttractionById; the fake returns undefined for
+    // unknown ids, so assert the slot and attraction linkage instead.
+    expect(db.createBookingSlot).toHaveBeenCalledWith(
+      expect.objectContaining({ bookingId: result.id, slotId: 7, attractionId: 2 }),
+    );
+  });
+
+  it("rejects unavailable tour slots", async () => {
+    const db = await import("./db");
+    vi.mocked(db.listActiveTourSlots).mockResolvedValue([]);
+    const caller = appRouter.createCaller(createAuthContext());
+    await expect(
+      caller.bookings.create({
+        visitDate: tomorrow(),
+        lines: [{ categoryId: 1, quantity: 1 }],
+        slotIds: [7],
+      }),
+    ).rejects.toThrow(/no longer available/i);
+  });
+});
+
+describe("analytics gating", () => {
+  it("blocks non-admin users from analytics endpoints", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    await expect(caller.analytics.categoryBreakdown()).rejects.toThrow();
+    await expect(caller.analytics.monthlyTrends({ months: 6 })).rejects.toThrow();
+  });
+
+  it("allows admins to read analytics", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    const breakdown = await caller.analytics.categoryBreakdown();
+    expect(Array.isArray(breakdown)).toBe(true);
   });
 });
