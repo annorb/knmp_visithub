@@ -100,6 +100,31 @@ export async function getUserByOpenId(openId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Admin user management
+// ---------------------------------------------------------------------------
+export async function listAllUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(users).orderBy(users.createdAt).limit(500);
+}
+
+export async function updateUserRole(userId: number, role: "user" | "admin", selfId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  // Prevent self-demotion to keep at least one admin able to manage the platform
+  if (userId === selfId && role !== "admin") {
+    throw new Error("You cannot remove your own administrator role");
+  }
+  await db.update(users).set({ role }).where(eq(users.id, userId));
+}
+
+export async function setUserActive(userId: number, isActive: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.update(users).set({ isActive }).where(eq(users.id, userId));
+}
+
+// ---------------------------------------------------------------------------
 // Attractions
 // ---------------------------------------------------------------------------
 export async function listActiveAttractions() {

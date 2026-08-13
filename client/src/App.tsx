@@ -15,6 +15,7 @@ import AdminAttractions from "./pages/admin/AdminAttractions";
 import AdminCategories from "./pages/admin/AdminCategories";
 import AdminBookings from "./pages/admin/AdminBookings";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
+import AdminUsers from "./pages/admin/AdminUsers";
 
 function Router() {
   return (
@@ -30,6 +31,7 @@ function Router() {
       <Route path={"/admin/categories"} component={AdminCategories} />
       <Route path={"/admin/bookings"} component={AdminBookings} />
       <Route path={"/admin/analytics"} component={AdminAnalytics} />
+      <Route path={"/admin/users"} component={AdminUsers} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

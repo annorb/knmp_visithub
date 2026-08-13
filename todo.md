@@ -44,3 +44,10 @@
 - [x] PDF ticket download UI on booking confirmation and My Bookings
 - [x] Admin analytics page: KPIs, visitor-category breakdown, monthly revenue trend chart; nav entry + route
 - [x] Tests (22 passing incl. multi-day validation & slots) + visual verification + checkpoint
+
+## Enhancement Round 2 (user request — actor specification gaps)
+- [x] DB schema: isActive flag on users table + migration applied
+- [x] Backend: admin users list / role update / activate-deactivate procedures (adminProcedure, self-demotion protection)
+- [x] Auth gating: blocked (inactive) users cannot use protected endpoints (ForbiddenError in authenticateRequest)
+- [x] Admin page: Users management (table, role change, activate/deactivate) + nav entry + route
+- [x] Tests (26 passing incl. user management) + visual verification + checkpoint

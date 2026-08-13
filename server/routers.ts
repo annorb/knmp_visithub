@@ -32,7 +32,10 @@ import {
   listAllBookings,
   listAllCategories,
   listActiveTourSlots,
+  listAllUsers,
   listItineraryByDate,
+  setUserActive,
+  updateUserRole,
   listMyItinerary,
   reorderItineraryItem,
   searchAttractions,
@@ -337,6 +340,17 @@ export const appRouter = router({
         return { success: true } as const;
       }),
     stats: adminProcedure.query(() => getBookingStats()),
+  }),
+
+  /** Admin user management: view users, change roles, activate/deactivate. */
+  users: router({
+    listAll: adminProcedure.query(() => listAllUsers()),
+    updateRole: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "admin"]) }))
+      .mutation(({ ctx, input }) => updateUserRole(input.userId, input.role, ctx.user.id)),
+    setActivation: adminProcedure
+      .input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() }))
+      .mutation(({ input }) => setUserActive(input.userId, input.isActive)),
   }),
 
   /** Public guided-tour time slots per attraction. */

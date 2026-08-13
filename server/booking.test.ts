@@ -115,6 +115,9 @@ vi.mock("./db", async importOriginal => {
     createBookingSlot: vi.fn(async () => undefined),
     getCategoryBreakdown: vi.fn(async () => []),
     getMonthlyTrends: vi.fn(async () => []),
+    listAllUsers: vi.fn(async () => []),
+    updateUserRole: vi.fn(async () => undefined),
+    setUserActive: vi.fn(async () => undefined),
   };
 });
 
@@ -416,5 +419,45 @@ describe("analytics gating", () => {
     const caller = appRouter.createCaller(createAuthContext("admin"));
     const breakdown = await caller.analytics.categoryBreakdown();
     expect(Array.isArray(breakdown)).toBe(true);
+  });
+});
+
+describe("admin users management", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("blocks non-admin users from user management endpoints", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    await expect(caller.users.listAll()).rejects.toThrow();
+    await expect(
+      caller.users.setActivation({ userId: 1, isActive: false }),
+    ).rejects.toThrow();
+  });
+
+  it("lets admins list registered users", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    const list = await caller.users.listAll();
+    expect(Array.isArray(list)).toBe(true);
+  });
+
+  it("prevents an admin from demoting themselves", async () => {
+    const db = await import("./db");
+    vi.mocked(db.updateUserRole).mockRejectedValue(
+      new Error("You cannot remove your own administrator role"),
+    );
+    const adminCaller = appRouter.createCaller(createAuthContext("admin"));
+    await expect(
+      adminCaller.users.updateRole({ userId: 99, role: "user" }),
+    ).rejects.toThrow(/own administrator role/i);
+  });
+
+  it("allows admins to activate and deactivate accounts", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    await caller.users.setActivation({ userId: 7, isActive: false });
+    const db = await import("./db");
+    expect(db.setUserActive).toHaveBeenCalledWith(7, false);
+    await caller.users.setActivation({ userId: 7, isActive: true });
+    expect(db.setUserActive).toHaveBeenCalledWith(7, true);
   });
 });
