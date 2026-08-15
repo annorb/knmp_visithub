@@ -205,6 +205,112 @@ for (const c of categories) {
   }
 }
 
+// Sample events: special programs and guided tours (dates relative, future-facing)
+const mausoleum = attractions.find(a => a.slug === "mausoleum");
+const museum = attractions.find(a => a.slug === "museum");
+const gardens = attractions.find(a => a.slug === "gardens");
+const today = new Date();
+const plusDays = n => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + n));
+const events = [
+  {
+    title: "Independence Day Special Program",
+    slug: "independence-day-special",
+    description:
+      "Join us for a special Independence Day commemoration featuring wreath-laying at the Mausoleum, live drumming, and readings from Nkrumah's works. Open to all visitors.",
+    eventType: "program",
+    attractionId: mausoleum?.id ?? null,
+    eventDate: plusDays(12),
+    startTime: "09:00",
+    endTime: "12:00",
+    meetingPoint: "Main entrance forecourt",
+    guideName: "Dr. A. Biney",
+    capacity: 0,
+    feePesewas: 0,
+    registrationDeadline: null,
+    isPublished: true,
+    sortIndex: 0,
+  },
+  {
+    title: "Mausoleum Guided Heritage Tour",
+    slug: "mausoleum-guided-heritage-tour",
+    description:
+      "A guided walk through the Kwame Nkrumah Mausoleum and its grounds: the glass-lined tomb, the liberation-heroes statues, and the reflecting pool, with stories of the independence movement.",
+    eventType: "guided_tour",
+    attractionId: mausoleum?.id ?? null,
+    eventDate: plusDays(6),
+    startTime: "10:00",
+    endTime: "11:30",
+    meetingPoint: "Mausoleum entrance steps",
+    guideName: "Mr. O. Mensah",
+    capacity: 25,
+    feePesewas: 2000,
+    registrationDeadline: plusDays(5),
+    isPublished: true,
+    sortIndex: 1,
+  },
+  {
+    title: "Museum Artefacts & Archives Tour",
+    slug: "museum-artefacts-archives-tour",
+    description:
+      "Explore the museum galleries with a curator: personal belongings of Dr. Nkrumah, independence-era photographs and documents, and the audio-visual archive collection.",
+    eventType: "guided_tour",
+    attractionId: museum?.id ?? null,
+    eventDate: plusDays(9),
+    startTime: "14:00",
+    endTime: "15:30",
+    meetingPoint: "Museum front desk",
+    guideName: "Mrs. E. Adjei",
+    capacity: 15,
+    feePesewas: 1500,
+    registrationDeadline: null,
+    isPublished: true,
+    sortIndex: 2,
+  },
+  {
+    title: "Weekend Gardens & Library Walk",
+    slug: "gardens-library-walk",
+    description:
+      "A relaxed guided stroll through the pool gardens and a stop at the memorial library, with time for photographs and questions about the park's landscape design.",
+    eventType: "guided_tour",
+    attractionId: gardens?.id ?? null,
+    eventDate: plusDays(3),
+    startTime: "08:30",
+    endTime: "09:30",
+    meetingPoint: "Gardens pathway entrance",
+    guideName: "Mr. K. Boateng",
+    capacity: 20,
+    feePesewas: 0,
+    registrationDeadline: null,
+    isPublished: true,
+    sortIndex: 3,
+  },
+];
+for (const e of events) {
+  const [existing] = await conn.execute("SELECT id FROM events WHERE slug = ?", [e.slug]);
+  if (!existing.length) {
+    const deadline = e.registrationDeadline
+      ? deadlineString(e.registrationDeadline)
+      : null;
+    await conn.execute(
+      `INSERT INTO events (title, slug, description, eventType, attractionId, eventDate, startTime, endTime, meetingPoint, guideName, capacity, feePesewas, registrationDeadline, isPublished, sortIndex)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [e.title, e.slug, e.description, e.eventType, e.attractionId, dateString(e.eventDate), e.startTime, e.endTime, e.meetingPoint, e.guideName, e.capacity, e.feePesewas, deadline, e.isPublished, e.sortIndex],
+    );
+    console.log(`Seeded event: ${e.title} (${e.eventType})`);
+  }
+}
+
+function dateString(d) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function deadlineString(d) {
+  return dateString(d);
+}
+
 await conn.end();
 console.log("Seed complete.");
 process.exit(0);

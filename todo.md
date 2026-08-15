@@ -117,3 +117,12 @@
 - [x] Booking form: group booking package hints on category cards (e.g. "20% group rate from 15 visitors") + discount lines in live cost summary; admin categories form manages group settings
 - [x] Itinerary PDF export: exportPdf verified working; filename enhanced to KNMP-itinerary-YYYY-MM-DD.pdf
 - [x] Tests for Round 8 (server/round8.test.ts: group discount calc, lat/lng bounds, exportPdf presence) + visual verification + checkpoint — 80 tests passing
+
+## Enhancement Round 9 (user request)
+- [ ] DB schema: events table (title, description, type program/guided-tour, event date, time window, attraction, capacity, fee pesewas, registration deadline, status) + event_registrations table (booking/visitor ref, attendee name, quantity, checked-in) + migrations
+- [ ] Backend: admin events CRUD + publish/unpublish + capacity/registration management; audit events on changes
+- [ ] Backend: public calendar endpoints (month-grid event list, upcoming events, event details, registration availability)
+- [ ] Backend: visitor tour registration (capacity check, unique registration ref, email notification to visitor)
+- [ ] Frontend: public Events page with interactive month calendar, event detail dialog, direct guided-tour registration with confirmation
+- [ ] Frontend: admin Events page (calendar + list management, publish/unpublish, view registrations, capacity override)
+- [ ] Tests for Round 9 + visual verification + checkpoint + GitHub push

@@ -6,6 +6,20 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
+  cancelEventRegistration,
+  countRegistrationsByEventId,
+  createEvent,
+  createEventRegistration,
+  deleteEvent,
+  getEventById,
+  getMyRegistrations,
+  getRegistrationByReference,
+  getRegistrationsByEventId,
+  listAllEvents,
+  listEventsMonth,
+  listPublishedEvents,
+  listUpcomingEvents,
+  updateEvent,
   cancelOwnBooking,
   createAttraction,
   createBooking,
@@ -69,6 +83,7 @@ import {
 import { buildTicketPdfBuffer, type TicketData } from "./ticketPdf";
 import { sendBookingConfirmationEmail, sendBookingStatusEmail } from "./email";
 import { buildItineraryPdfBuffer, isoDate, type ItineraryPdfData, type ItineraryRow } from "./itineraryPdf";
+import { sendEventRegistrationEmail } from "./email";
 import { nanoid } from "nanoid";
 import type { InsertAttraction, InsertVisitorCategory } from "../drizzle/schema";
 
@@ -799,6 +814,224 @@ export const appRouter = router({
   /** Public guided-tour time slots per attraction. */
   tours: router({
     list: publicProcedure.query(() => listActiveTourSlots()),
+  }),
+
+  /**
+   * Events calendar: published programs and guided tours. Visitors can browse
+   * the calendar, view event details and register for guided tours directly.
+   */
+  events: router({
+    /** Public upcoming events (for the calendar page list). */
+    upcoming: publicProcedure.query(() => listUpcomingEvents()),
+    /** Public events falling within a specific calendar month (year, month 1-12). */
+    listMonth: publicProcedure
+      .input(z.object({ year: z.number().int(), month: z.number().int().min(1).max(12) }))
+      .query(({ input }) => listEventsMonth(input.year, input.month)),
+    /** Public event detail page data, including live registration availability. */
+    details: publicProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .query(async ({ input }) => {
+        const event = await getEventById(input.id);
+        if (!event || !event.isPublished) {
+          throw new Error("Event not found");
+        }
+        const activeParticipants = await countRegistrationsByEventId(event.id);
+        const attraction = event.attractionId ? await getAttractionById(event.attractionId) : undefined;
+        const today = isoDate(new Date());
+        const deadline = event.registrationDeadline ? isoDate(event.registrationDeadline) : undefined;
+        const registrationOpen =
+          !deadline || deadline >= today;
+        const capacityFull =
+          event.capacity > 0 && activeParticipants >= event.capacity;
+        return {
+          event,
+          attractionName: attraction?.name ?? null,
+          activeParticipants,
+          remainingPlaces: event.capacity > 0 ? Math.max(0, event.capacity - activeParticipants) : null,
+          registrationOpen,
+          capacityFull,
+        };
+      }),
+    /** Visitor registration for a published guided tour. */
+    register: protectedProcedure
+      .input(
+        z.object({
+          eventId: z.number().int().positive(),
+          attendeeName: z.string().min(1).max(200),
+          contactEmail: z.string().max(200).optional(),
+          numberOfParticipants: z.number().int().min(1).max(50),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const event = await getEventById(input.eventId);
+        if (!event || !event.isPublished) {
+          throw new Error("Event not found");
+        }
+        if (event.eventType !== "guided_tour") {
+          throw new Error("Direct registration is only available for guided tours");
+        }
+        const today = isoDate(new Date());
+        const deadline = event.registrationDeadline ? isoDate(event.registrationDeadline) : undefined;
+        if (deadline && deadline < today) {
+          throw new Error("Registration for this event has closed");
+        }
+        if (event.capacity > 0) {
+          const activeParticipants = await countRegistrationsByEventId(event.id);
+          if (activeParticipants + input.numberOfParticipants > event.capacity) {
+            throw new Error("Not enough places remaining for your party");
+          }
+        }
+        const reference = await generateUniqueReference();
+        const registration = await createEventRegistration({
+          reference,
+          eventId: event.id,
+          userId: ctx.user.id,
+          attendeeName: input.attendeeName.trim(),
+          contactEmail: input.contactEmail?.trim() || ctx.user.email || null,
+          numberOfParticipants: input.numberOfParticipants,
+          isCancelled: false,
+        });
+        sendEventRegistrationEmail({
+          eventName: event.title,
+          eventDate: isoDate(event.eventDate),
+          startTime: event.startTime ?? null,
+          endTime: event.endTime ?? null,
+          meetingPoint: event.meetingPoint ?? null,
+          reference,
+          attendeeName: input.attendeeName.trim(),
+          numberOfParticipants: input.numberOfParticipants,
+          feePesewas: event.feePesewas,
+          recipientEmail: input.contactEmail?.trim() || ctx.user.email || null,
+        });
+        return { reference };
+      }),
+    /** Visitor registrations (My events). */
+    myRegistrations: protectedProcedure.query(async ({ ctx }) => {
+      const registrations = await getMyRegistrations(ctx.user.id);
+      const eventIds = Array.from(new Set(registrations.map(r => r.eventId)));
+      const eventsById = new Map<number, Awaited<ReturnType<typeof getEventById>>>();
+      for (const id of eventIds) {
+        eventsById.set(id, await getEventById(id));
+      }
+      return registrations.map(r => ({ registration: r, event: eventsById.get(r.eventId) ?? null }));
+    }),
+    /** Visitor cancellation of own registration. */
+    cancelRegistration: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await cancelEventRegistration(input.id, ctx.user.id);
+        return { success: true } as const;
+      }),
+    /** Admin: full events management. */
+    admin: router({
+      list: adminProcedure.query(() => listAllEvents()),
+      details: adminProcedure
+        .input(z.object({ id: z.number().int().positive() }))
+        .query(async ({ input }) => {
+          const event = await getEventById(input.id);
+          if (!event) throw new Error("Event not found");
+          const [registrations, attraction] = await Promise.all([
+            getRegistrationsByEventId(event.id),
+            event.attractionId ? getAttractionById(event.attractionId) : Promise.resolve(undefined),
+          ]);
+          return {
+            event,
+            attractionName: attraction?.name ?? null,
+            activeParticipants: registrations.filter(r => !r.isCancelled).length,
+            registrations,
+          };
+        }),
+      create: adminProcedure
+        .input(
+          z.object({
+            title: z.string().min(1).max(200),
+            description: z.string().min(1),
+            eventType: z.enum(["program", "guided_tour"]),
+            attractionId: z.number().int().positive().optional(),
+            eventDate: z.date(),
+            startTime: z.string().max(5).optional(),
+            endTime: z.string().max(5).optional(),
+            meetingPoint: z.string().max(200).optional(),
+            guideName: z.string().max(100).optional(),
+            imageUrl: z.string().max(2000).optional().nullable(),
+            capacity: z.number().int().min(0).max(10000),
+            feePesewas: z.number().int().min(0).max(10000000),
+            registrationDeadline: z.date().optional(),
+            isPublished: z.boolean().default(false),
+            sortIndex: z.number().int().default(0),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          const slug = slugify(input.title);
+          const created = await createEvent({ ...input, slug });
+          await createAuditEvent({
+            actorId: ctx.user.id,
+            actorName: ctx.user.name ?? ctx.user.email ?? null,
+            action: input.isPublished ? "event_published" : "event_created",
+            targetUserId: null,
+            targetName: input.title,
+            detail: `Event "${input.title}" (${input.eventType}) on ${isoDate(input.eventDate)}${input.isPublished ? " (published)" : ""}`,
+          });
+          return created;
+        }),
+      update: adminProcedure
+        .input(
+          z.object({
+            id: z.number().int().positive(),
+            title: z.string().min(1).max(200).optional(),
+            description: z.string().min(1).optional(),
+            eventType: z.enum(["program", "guided_tour"]).optional(),
+            attractionId: z.number().int().positive().nullable().optional(),
+            eventDate: z.date().optional(),
+            startTime: z.string().max(5).nullable().optional(),
+            endTime: z.string().max(5).nullable().optional(),
+            meetingPoint: z.string().max(200).nullable().optional(),
+            guideName: z.string().max(100).nullable().optional(),
+            imageUrl: z.string().max(2000).nullable().optional(),
+            capacity: z.number().int().min(0).max(10000).optional(),
+            feePesewas: z.number().int().min(0).max(10000000).optional(),
+            registrationDeadline: z.date().nullable().optional(),
+            isPublished: z.boolean().optional(),
+            sortIndex: z.number().int().optional(),
+          }),
+        )
+        .mutation(async ({ ctx, input }) => {
+          const { id, ...data } = input;
+          const before = await getEventById(id);
+          await updateEvent(id, data);
+          const action = data.isPublished ? "event_published" : "event_updated";
+          await createAuditEvent({
+            actorId: ctx.user.id,
+            actorName: ctx.user.name ?? ctx.user.email ?? null,
+            action,
+            targetUserId: null,
+            targetName: before?.title ?? null,
+            detail: `Event updated${before ? `: ${before.title}` : ""}${data.isPublished ? " (published)" : ""}`,
+          });
+          return { success: true } as const;
+        }),
+      remove: adminProcedure
+        .input(z.object({ id: z.number().int().positive() }))
+        .mutation(async ({ ctx, input }) => {
+          const before = await getEventById(input.id);
+          await deleteEvent(input.id);
+          await createAuditEvent({
+            actorId: ctx.user.id,
+            actorName: ctx.user.name ?? ctx.user.email ?? null,
+            action: "event_deleted",
+            targetUserId: null,
+            targetName: before?.title ?? null,
+            detail: `Event deleted: ${before?.title ?? "unknown"}`,
+          });
+          return { success: true } as const;
+        }),
+      cancelRegistration: adminProcedure
+        .input(z.object({ id: z.number().int().positive() }))
+        .mutation(async ({ ctx, input }) => {
+          await cancelEventRegistration(input.id, ctx.user.id);
+          return { success: true } as const;
+        }),
+    }),
   }),
 
   /** PDF entry ticket for a booking (owner or admin access). */

@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  date,
   int,
   mysqlEnum,
   mysqlTable,
@@ -234,6 +235,64 @@ export type InsertItineraryShare = typeof itineraryShares.$inferInsert;
 /**
  * Site-wide settings stored as key/value rows (capacity limits, thresholds).
  */
+/**
+ * Published park events: special programs and guided tours that visitors can
+ * browse on the public events calendar and book directly.
+ */
+export const events = mysqlTable("events", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 200 }).notNull(),
+  slug: varchar("slug", { length: 200 }).notNull().unique(),
+  description: text("description").notNull(),
+  /** "program" for special programs, "guided_tour" for guided tours bookable by visitors. */
+  eventType: varchar("eventType", { length: 20 }).notNull().default("program"),
+  /** The attraction this event is tied to (nullable for park-wide programs). */
+  attractionId: int("attractionId"),
+  /** Event date at 00:00 UTC (day-level scheduling). */
+  eventDate: date("eventDate").notNull(),
+  /** Start time e.g. "09:30". */
+  startTime: varchar("startTime", { length: 5 }),
+  /** End time e.g. "11:00". */
+  endTime: varchar("endTime", { length: 5 }),
+  /** Meeting point label, e.g. "Main entrance". */
+  meetingPoint: varchar("meetingPoint", { length: 200 }),
+  /** Guide name or lead staff, e.g. "Mr. O. Mensah". */
+  guideName: varchar("guideName", { length: 100 }),
+  /** Optional attraction image or event poster URL. */
+  imageUrl: text("imageUrl"),
+  /** Max participants allowed (0 = unlimited). */
+  capacity: int("capacity").default(0).notNull(),
+  /** Participant fee in pesewas (0 = free). */
+  feePesewas: int("feePesewas").default(0).notNull(),
+  /** Last day visitors may register; null means until capacity is reached. */
+  registrationDeadline: date("registrationDeadline"),
+  isPublished: boolean("isPublished").default(false).notNull(),
+  sortIndex: int("sortIndex").default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ParkEvent = typeof events.$inferSelect;
+export type InsertParkEvent = typeof events.$inferInsert;
+
+/**
+ * Visitor registrations for published events (direct guided-tour bookings).
+ */
+export const eventRegistrations = mysqlTable("event_registrations", {
+  id: int("id").autoincrement().primaryKey(),
+  reference: varchar("reference", { length: 20 }).notNull().unique(),
+  eventId: int("eventId").notNull(),
+  userId: int("userId").notNull(),
+  attendeeName: varchar("attendeeName", { length: 200 }).notNull(),
+  contactEmail: varchar("contactEmail", { length: 200 }),
+  numberOfParticipants: int("numberOfParticipants").default(1).notNull(),
+  isCancelled: boolean("isCancelled").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type EventRegistration = typeof eventRegistrations.$inferSelect;
+export type InsertEventRegistration = typeof eventRegistrations.$inferInsert;
+
 export const siteSettings = mysqlTable("site_settings", {
   id: int("id").autoincrement().primaryKey(),
   key: varchar("key", { length: 64 }).notNull().unique(),

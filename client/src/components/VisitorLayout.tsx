@@ -19,8 +19,9 @@ import { Link, useLocation } from "wouter";
 
 const navLinks = [
   { href: "/explore", label: "Explore", icon: Landmark },
+  { href: "/events", label: "Events", icon: CalendarDays },
   { href: "/book", label: "Book a Visit", icon: Ticket },
-  { href: "/bookings", label: "My Bookings", icon: CalendarDays, auth: true as const },
+  { href: "/bookings", label: "My Bookings", icon: NotebookPen, auth: true as const },
   { href: "/itinerary", label: "Itinerary", icon: NotebookPen, auth: true as const },
 ];
 

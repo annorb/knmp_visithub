@@ -196,3 +196,76 @@ export async function sendBookingStatusEmail(data: {
     html,
   });
 }
+
+/**
+ * Confirms a visitor's guided-tour registration with their unique reference.
+ * Fire-and-forget: returns a result instead of throwing so that a missing
+ * email address or a temporary provider outage never blocks the registration.
+ */
+export function sendEventRegistrationEmail(data: {
+  eventName: string;
+  eventDate: string;
+  startTime: string | null;
+  endTime: string | null;
+  meetingPoint: string | null;
+  reference: string;
+  attendeeName: string;
+  numberOfParticipants: number;
+  feePesewas: number;
+  recipientEmail: string | null;
+}): void {
+  const {
+    eventName,
+    eventDate,
+    startTime,
+    endTime,
+    meetingPoint,
+    reference,
+    attendeeName,
+    numberOfParticipants,
+    feePesewas,
+    recipientEmail,
+  } = data;
+  if (!recipientEmail) return;
+  const timeLabel =
+    startTime && endTime
+      ? `${startTime} – ${endTime}`
+      : startTime
+        ? `from ${startTime}`
+        : "";
+  const greeting = attendeeName.split(" ")[0];
+  const html = `
+<!doctype html>
+<html>
+<body style="margin:0;padding:24px;font-family:Georgia,serif;color:#1c1917;background:#fafaf9;">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e7e5e4;border-radius:12px;padding:32px;">
+    <p style="margin:0 0 8px;font-size:12px;letter-spacing:2px;color:#b8860b;text-transform:uppercase;">Kwame Nkrumah Memorial Park</p>
+    <h1 style="margin:0 0 16px;font-size:24px;color:#14532d;">Tour registered, ${greeting}!</h1>
+    <p style="margin:0 0 16px;line-height:1.6;">
+      You are registered for <strong style="color:#14532d;">${eventName}</strong> on
+      <strong>${fmtDate(new Date(eventDate))}</strong>${timeLabel ? ` at <strong>${timeLabel}</strong>` : ""}.
+      Your party size is <strong>${numberOfParticipants}</strong> and your
+      registration reference is <strong style="color:#b8860b;">${reference}</strong>.
+      ${meetingPoint ? `<br/>Please meet us at <strong>${meetingPoint}</strong>.` : ""}
+      ${feePesewas > 0 ? `<br/>The fee of <strong>${fghs(feePesewas)}</strong> per participant is payable at the meeting point.` : "This tour is free of charge."}
+    </p>
+    <p style="margin:0 0 24px;line-height:1.6;">
+      Please keep your reference handy and present it to the guide on the day.
+      You can view or cancel your registrations from your account.
+    </p>
+    <p style="margin:0;border-top:1px solid #e7e5e4;padding-top:16px;font-size:13px;color:#78716c;">
+      Kwame Nkrumah Memorial Park &amp; Mausoleum · High Street, Accra
+    </p>
+  </div>
+</body>
+</html>`;
+  sendResend({
+    to: [recipientEmail],
+    subject: `Tour registered — ${reference}`,
+    html,
+  }).then(result => {
+    if (!result.sent) {
+      console.warn("[Email] Event registration email skipped:", result.reason);
+    }
+  });
+}

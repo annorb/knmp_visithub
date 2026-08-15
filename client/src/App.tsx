@@ -20,6 +20,8 @@ import AdminUsers from "./pages/admin/AdminUsers";
 import AdminGate from "./pages/admin/AdminGate";
 import AdminSettings from "./pages/admin/AdminSettings";
 import AdminAudit from "./pages/admin/AdminAudit";
+import AdminEvents from "./pages/admin/AdminEvents";
+import Events from "./pages/Events";
 
 function Router() {
   return (
@@ -30,6 +32,7 @@ function Router() {
       <Route path={"/book"} component={Book} />
       <Route path={"/bookings"} component={MyBookings} />
       <Route path={"/itinerary"} component={Itinerary} />
+      <Route path={"/events"} component={Events} />
       <Route path={"/share/itinerary/:code"} component={ItineraryShare} />
       <Route path={"/admin"} component={AdminOverview} />
       <Route path={"/admin/attractions"} component={AdminAttractions} />
@@ -40,6 +43,7 @@ function Router() {
       <Route path={"/admin/gate"} component={AdminGate} />
       <Route path={"/admin/settings"} component={AdminSettings} />
       <Route path={"/admin/audit"} component={AdminAudit} />
+      <Route path={"/admin/events"} component={AdminEvents} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

@@ -1,9 +1,11 @@
-import { and, desc, eq, gt, gte, like, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, like, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   attractions,
   auditEvents,
   bookings,
+  events,
+  eventRegistrations,
   bookingItems,
   itineraryItems,
   itineraryShares,
@@ -21,6 +23,8 @@ import {
   type InsertBooking,
   type InsertBookingItem,
   type InsertBookingSlot,
+  type InsertEventRegistration,
+  type InsertParkEvent,
   type InsertItineraryItem,
   type InsertTourSlot,
   type InsertUser,
@@ -892,4 +896,142 @@ export async function listItineraryByCode(shareCode: string) {
     .where(eq(itineraryItems.userId, owner))
     .orderBy(itineraryItems.visitDate, itineraryItems.sortIndex, itineraryItems.id);
   return { userId: owner, items };
+}
+
+// ---------------------------------------------------------------------------
+// Events & event registrations (Round 9: interactive events calendar)
+// ---------------------------------------------------------------------------
+
+/** All events for admin management (includes unpublished). */
+export async function listAllEvents() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(events).orderBy(desc(events.eventDate), desc(events.createdAt));
+}
+
+/** Events visible to visitors. */
+export async function listPublishedEvents() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(events)
+    .where(and(eq(events.isPublished, true), gt(events.eventDate, new Date())))
+    .orderBy(events.eventDate, asc(events.startTime ?? events.createdAt));
+}
+
+export async function listEventsMonth(year: number, month: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const from = new Date(Date.UTC(year, month - 1, 1));
+  const to = new Date(Date.UTC(year, month, 1));
+  return db
+    .select()
+    .from(events)
+    .where(and(eq(events.isPublished, true), gte(events.eventDate, from), lt(events.eventDate, to)))
+    .orderBy(events.eventDate, asc(events.startTime ?? events.createdAt));
+}
+
+export async function listUpcomingEvents(limit = 12) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(events)
+    .where(and(eq(events.isPublished, true), gte(events.eventDate, new Date())))
+    .orderBy(events.eventDate, asc(events.startTime ?? events.createdAt))
+    .limit(limit);
+}
+
+export async function getEventById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select().from(events).where(eq(events.id, id)).limit(1);
+  return rows[0];
+}
+
+export async function createEvent(data: InsertParkEvent) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const rows = await db.insert(events).values(data);
+  const id = rows[0].insertId;
+  return getEventById(id);
+}
+
+export async function updateEvent(id: number, data: Partial<InsertParkEvent>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.update(events).set(data).where(eq(events.id, id));
+}
+
+export async function deleteEvent(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.delete(eventRegistrations).where(eq(eventRegistrations.eventId, id));
+  await db.delete(events).where(eq(events.id, id));
+}
+
+/** Active (non-cancelled) registrations counted per event. */
+export async function countRegistrationsByEventId(eventId: number) {
+  const db = await getDb();
+  if (!db) return 0;
+  const rows = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(eventRegistrations)
+    .where(
+      and(
+        eq(eventRegistrations.eventId, eventId),
+        eq(eventRegistrations.isCancelled, false),
+      ),
+    );
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function createEventRegistration(data: InsertEventRegistration) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  const rows = await db.insert(eventRegistrations).values(data);
+  const id = rows[0].insertId;
+  const rows2 = await db.select().from(eventRegistrations).where(eq(eventRegistrations.id, id)).limit(1);
+  return rows2[0];
+}
+
+export async function getRegistrationsByEventId(eventId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(eventRegistrations)
+    .where(eq(eventRegistrations.eventId, eventId))
+    .orderBy(desc(eventRegistrations.createdAt));
+}
+
+export async function getMyRegistrations(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(eventRegistrations)
+    .where(eq(eventRegistrations.userId, userId))
+    .orderBy(desc(eventRegistrations.createdAt));
+}
+
+export async function getRegistrationByReference(reference: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db
+    .select()
+    .from(eventRegistrations)
+    .where(eq(eventRegistrations.reference, reference))
+    .limit(1);
+  return rows[0];
+}
+
+export async function cancelEventRegistration(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db
+    .update(eventRegistrations)
+    .set({ isCancelled: true })
+    .where(and(eq(eventRegistrations.id, id), eq(eventRegistrations.userId, userId)));
 }
