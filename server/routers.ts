@@ -23,6 +23,9 @@ import {
   getBookingSlotsByBookingId,
   getBookingStats,
   getCategoryBreakdown,
+  getCategoryBreakdownCsv,
+  getDailyVisitorForecast,
+  DAILY_VISITOR_CAPACITY,
   getMonthlyTrends,
   getMyBookings,
   getUpcomingMyBookings,
@@ -52,6 +55,7 @@ import {
   updateItineraryItem,
 } from "./db";
 import { buildTicketPdfBuffer, type TicketData } from "./ticketPdf";
+import { sendBookingConfirmationEmail } from "./email";
 import { buildItineraryPdfBuffer, isoDate, type ItineraryPdfData, type ItineraryRow } from "./itineraryPdf";
 import { nanoid } from "nanoid";
 import type { InsertAttraction, InsertVisitorCategory } from "../drizzle/schema";
@@ -354,6 +358,60 @@ export const appRouter = router({
             });
           }
         }
+        // Fire-and-forget confirmation email with the PDF ticket attached;
+        // failure never blocks a completed booking.
+        void (async () => {
+          try {
+            const emailTarget = input.contactEmail ?? ctx.user?.email ?? null;
+            if (!emailTarget) return;
+            const [items, slots, allSlots] = await Promise.all([
+              getBookingItemsByBookingId(bookingId),
+              getBookingSlotsByBookingId(bookingId),
+              listActiveTourSlots(),
+            ]);
+            const labelMap = new Map(allSlots.map(s => [`${s.attractionId}-${s.startTime}`, s.label ?? ""]));
+            const ticketData: TicketData = {
+              reference,
+              visitorName: input.visitorName ?? null,
+              contactEmail: emailTarget,
+              contactPhone: input.contactPhone ?? null,
+              visitDate: dateOnly(input.visitDate),
+              visitEndDate: endDate ?? null,
+              totalPesewas,
+              totalVisitors: items.reduce((sum, i) => sum + i.quantity, 0),
+              status: "confirmed",
+              items,
+              slots: slots.map(s => ({
+                attractionId: s.attractionId,
+                attractionName: s.attractionName,
+                startTime: allSlots.find(a => a.id === s.slotId)?.startTime ?? "",
+                endTime: allSlots.find(a => a.id === s.slotId)?.endTime ?? "",
+                label: allSlots.find(a => a.id === s.slotId)?.label,
+                visitDate: s.visitDate,
+              })),
+            };
+            const emailResult = await sendBookingConfirmationEmail({
+              to: emailTarget,
+              recipientName: ctx.user?.name ?? null,
+              booking: {
+                reference,
+                visitDate: dateOnly(input.visitDate),
+                visitEndDate: endDate ?? null,
+                totalPesewas,
+                totalVisitors: items.reduce((sum, i) => sum + i.quantity, 0),
+              },
+              ticketData,
+              slotLabels: labelMap,
+              siteBaseUrl: "https://knmp-visithub.manus.space",
+            });
+            if (!emailResult.sent && emailResult.reason) {
+              console.warn(`[Email] Confirmation not sent for ${reference}: ${emailResult.reason}`);
+            }
+          } catch (error) {
+            // Email failure is non-fatal; the booking and PDF download still stand.
+            console.warn(`[Email] Confirmation step failed for ${reference}:`, error);
+          }
+        })();
         return { id: bookingId, reference };
       }),
 
@@ -526,6 +584,16 @@ export const appRouter = router({
           .optional(),
       )
       .query(({ input }) => getCategoryBreakdown(input)),
+    categoryBreakdownCsv: adminProcedure
+      .input(
+        z
+          .object({
+            from: z.date().optional(),
+            to: z.date().optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getCategoryBreakdownCsv(input)),
     monthlyTrends: adminProcedure
       .input(
         z
@@ -547,6 +615,15 @@ export const appRouter = router({
           .optional(),
       )
       .query(({ input }) => getBookingStats(input)),
+    dailyForecast: adminProcedure
+      .input(
+        z
+          .object({
+            days: z.number().int().min(1).max(90).default(14),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getDailyVisitorForecast(input?.days ?? 14)),
   }),
 
   itineraries: router({

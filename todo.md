@@ -74,3 +74,11 @@
 - [x] Fix /admin analytics query failure: monthly trends SQL breaks when a visitDate range (from/to) is passed; review range semantics across stats, breakdown, trends and AdminAnalytics UI
 - [x] Root cause: TiDB prepared-statement path rejects SELECT-list aliases in ORDER BY; changed to positional ordering (sql`1 ASC`, sql`4 DESC`) in getMonthlyTrends and getCategoryBreakdown
 - [x] Add live-db regression tests for getMonthlyTrends / getCategoryBreakdown / getBookingStats with date ranges (47 tests passing)
+
+## Enhancement Round 5 (user request)
+- [x] Email sending capability: server email helper using Resend transactional email API (RESEND_API_KEY secret, validated by email.test.ts)
+- [x] Booking confirmation email: on successful booking creation, automatically email the PDF ticket to the visitor's registered email address (fire-and-forget, non-fatal)
+- [x] Admin category breakdown CSV export endpoint (adminProcedure) + Export CSV button on Analytics page
+- [x] Daily visitor-capacity forecast: backend daily visitor projection query (next 14 days, multi-day stays spread evenly, capacity constant 500)
+- [x] Frontend: daily visitor-capacity forecast chart with capacity reference line on the analytics page
+- [x] Tests (email helper with mocked fetch, CSV export, forecast query; RESEND key validation) + visual verification — 55 tests passing + checkpoint

@@ -618,6 +618,83 @@ export async function getCategoryBreakdown(range?: { from?: Date; to?: Date }) {
     .orderBy(sql`4 DESC`);
 }
 
+/**
+ * Daily visitor-capacity forecast: projected visitor quantities per day for the
+ * next 14 days, derived from confirmed/pending bookings. Multi-day bookings
+ * spread their visitors evenly across every day of the stay. Returns one row
+ * per day, including days with no bookings (visitors = 0). Also reports the
+ * number of distinct bookings touching each day.
+ */
+export async function getDailyVisitorForecast(days = 14) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const count = Math.max(1, Math.min(90, days));
+  const perDay = new Map<string, { visitors: number; bookings: Set<number> }>();
+
+  const detailRows = await db
+    .select({
+      id: bookings.id,
+      visitDate: bookings.visitDate,
+      visitEndDate: bookings.visitEndDate,
+      quantity: bookingItems.quantity,
+    })
+    .from(bookings)
+    .innerJoin(bookingItems, eq(bookings.id, bookingItems.bookingId))
+    .where(
+      and(
+        sql<boolean>`${bookings.status} != 'cancelled'`,
+        lte(bookings.visitDate, sql`DATE_ADD(CURDATE(), INTERVAL ${days} DAY)`),
+      ),
+    );
+
+  for (const row of detailRows) {
+    const start = new Date(row.visitDate);
+    const end = row.visitEndDate ? new Date(row.visitEndDate) : start;
+    const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+    const perDayShare = row.quantity / spanDays;
+    for (let i = 0; i < spanDays; i += 1) {
+      const d = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate() + i));
+      const key = d.toISOString().slice(0, 10);
+      const bucket = perDay.get(key) ?? { visitors: 0, bookings: new Set<number>() };
+      bucket.visitors += perDayShare;
+      bucket.bookings.add(row.id);
+      perDay.set(key, bucket);
+    }
+  }
+
+  const result: { date: string; visitors: number; bookings: number }[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const now = new Date();
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i));
+    const key = d.toISOString().slice(0, 10);
+    const bucket = perDay.get(key);
+    result.push({
+      date: key,
+      visitors: bucket ? Math.round(bucket.visitors * 10) / 10 : 0,
+      bookings: bucket ? bucket.bookings.size : 0,
+    });
+  }
+  return result;
+}
+
+/** Reference daily visitor capacity used to render the forecast chart. */
+export const DAILY_VISITOR_CAPACITY = 500;
+
+/** Visitor-category breakdown returned as CSV text for offline analysis. */
+export async function getCategoryBreakdownCsv(range?: { from?: Date; to?: Date }) {
+  const rows = await getCategoryBreakdown(range);
+  const header = ["category_id", "category_name", "visitors", "revenue_ghs"];
+  const lines = rows.map(row => {
+    const ghs = (Number(row.revenuePesewas ?? 0) / 100).toFixed(2);
+    const name = String(row.categoryName ?? "").includes(",")
+      ? `"${String(row.categoryName ?? "").replace(/"/g, '""')}"`
+      : String(row.categoryName ?? "");
+    return [String(row.categoryId ?? ""), name, String(row.visitors ?? 0), ghs].join(",");
+  });
+  return [header.join(","), ...lines].join("\r\n") + "\r\n";
+}
+
 /** Monthly revenue & booking trends, optionally scoped to a visit-date range. */
 export async function getMonthlyTrends(months = 6, range?: { from?: Date; to?: Date }) {
   const db = await getDb();

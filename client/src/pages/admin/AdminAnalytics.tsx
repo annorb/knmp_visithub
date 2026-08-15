@@ -3,10 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
+import { toast } from "sonner";
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -62,6 +64,39 @@ export default function AdminAnalytics() {
       enabled: true,
       placeholderData: prev => prev,
     });
+
+  const csvUtils = trpc.useUtils();
+  const [csvLoading, setCsvLoading] = useState(false);
+  const { data: forecast, isLoading: forecastLoading } =
+    trpc.analytics.dailyForecast.useQuery({ days: 14 }, {
+      placeholderData: prev => prev,
+    });
+
+  const downloadCsv = useCallback(async () => {
+    let csv: string | undefined;
+    setCsvLoading(true);
+    try {
+      const result = await csvUtils.analytics.categoryBreakdownCsv.fetch(range ?? undefined);
+      csv = result;
+    } finally {
+      setCsvLoading(false);
+    }
+    if (!csv) {
+      toast.error("No category data available to export yet.");
+      return;
+    }
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const stamp = rangeKey !== "|" ? `-${(range?.from ? toDateInputValue(range.from) : "start")}-to-${(range?.to ? toDateInputValue(range.to) : "now")}` : "";
+    a.href = url;
+    a.download = `KNMP-category-breakdown${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success("Category breakdown downloaded as CSV.");
+  }, [csvUtils, range, rangeKey]);
   // Key queries on the range so changing inputs forces a refetch.
   const [, setRefresh] = useState(0);
   const applyRange = useCallback(() => setRefresh(r => r + 1), []);
@@ -262,13 +297,102 @@ export default function AdminAnalytics() {
           </CardContent>
         </Card>
 
+        {/* Daily visitor forecast */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="font-display text-xl">Daily visitor forecast</CardTitle>
+            <CardDescription>
+              Projected visitors per day for the next 14 days, based on confirmed and pending
+              bookings. Multi-day stays are spread across each day of the visit. The dashed line
+              marks the park's reference daily capacity of 500 visitors.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {forecastLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : !forecast || forecast.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-10 text-center">
+                No upcoming booking data yet — the forecast will appear as visits are booked.
+              </p>
+            ) : (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={forecast.map(f => ({
+                      ...f,
+                      day: f.date.slice(8),
+                      capacity: 500,
+                      dayLabel: new Date(`${f.date}T00:00:00.000Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+                    }))}
+                    margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e7e5e4" vertical={false} />
+                    <XAxis
+                      dataKey="dayLabel"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                      interval={1}
+                      tickFormatter={label => label}
+                    />
+                    <YAxis
+                      tickFormatter={v => `${Number(v)}`}
+                      fontSize={12}
+                      tickLine={false}
+                      axisLine={false}
+                      width={48}
+                      domain={[0, 600]}
+                    />
+                    <Tooltip
+                      formatter={(value: number, name: string) =>
+                        name === "visitors" ? [value.toLocaleString(), "Projected visitors"] : null
+                      }
+                      labelFormatter={(_label, payload: Array<{ payload?: { date?: string } }> | undefined) => {
+                        const d = payload?.[0]?.payload?.date;
+                        return d
+                          ? new Date(`${d}T00:00:00.000Z`).toLocaleDateString("en-GB", {
+                              weekday: "short",
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : String(_label);
+                      }}
+                    />
+                    <Bar dataKey="capacity" fill="#f4f4f5" radius={0} isAnimationActive={false} />
+                    <Bar dataKey="visitors" fill="#14532d" radius={[4, 4, 0, 0]} />
+                    <ReferenceLine
+                      y={500}
+                      stroke="#b91c1c"
+                      strokeDasharray="6 4"
+                      label={{ value: "Capacity 500", position: "insideTopRight", fontSize: 11, fill: "#b91c1c" }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Category breakdown */}
         <Card>
           <CardHeader>
-            <CardTitle className="font-display text-xl">Visitor category breakdown</CardTitle>
-            <CardDescription>
-              Visitors and revenue per category across all non-cancelled bookings.
-            </CardDescription>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <CardTitle className="font-display text-xl">Visitor category breakdown</CardTitle>
+                <CardDescription>
+                  Visitors and revenue per category across all non-cancelled bookings.
+                </CardDescription>
+              </div>
+              <button
+                type="button"
+                onClick={downloadCsv}
+                disabled={csvLoading}
+                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-input px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                {csvLoading ? "Preparing…" : "Export CSV"}
+              </button>
+            </div>
           </CardHeader>
           <CardContent>
             {breakdownLoading ? (
