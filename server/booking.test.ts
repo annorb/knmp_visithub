@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  createAuditEvent,
+  listAttractionFacets,
+  listAuditEvents,
+  searchAttractionsFiltered,
+} from "./db";
+import { createAuditEvent, listAllUsers } from "./db";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
 
@@ -115,9 +122,13 @@ vi.mock("./db", async importOriginal => {
     createBookingSlot: vi.fn(async () => undefined),
     getCategoryBreakdown: vi.fn(async () => []),
     getMonthlyTrends: vi.fn(async () => []),
-    listAllUsers: vi.fn(async () => []),
+    listAllUsers: vi.fn(async () => []) as ReturnType<typeof vi.fn>,
     updateUserRole: vi.fn(async () => undefined),
     setUserActive: vi.fn(async () => undefined),
+    createAuditEvent: vi.fn(async () => undefined) as ReturnType<typeof vi.fn>,
+    listAuditEvents: vi.fn(async () => []),
+    listAttractionFacets: vi.fn(async () => ({ categories: [], locations: [] })),
+    searchAttractionsFiltered: vi.fn(async () => []) as ReturnType<typeof vi.fn>,
   };
 });
 
@@ -133,6 +144,11 @@ function createBaseContext(overrides: Partial<TrpcContext> = {}): TrpcContext {
     res: { clearCookie: () => undefined } as unknown as TrpcContext["res"],
     ...overrides,
   };
+}
+
+/** Public (unsigned) context for public-facing procedure tests. */
+function createPublicContext(): TrpcContext {
+  return createBaseContext();
 }
 
 let userSeq = 0;
@@ -442,13 +458,18 @@ describe("admin users management", () => {
   });
 
   it("prevents an admin from demoting themselves", async () => {
+    // Self-demotion is checked in the database layer when userId === actor id.
     const db = await import("./db");
-    vi.mocked(db.updateUserRole).mockRejectedValue(
-      new Error("You cannot remove your own administrator role"),
-    );
-    const adminCaller = appRouter.createCaller(createAuthContext("admin"));
+    vi.mocked(db.updateUserRole).mockImplementationOnce(async (userId, role, selfId) => {
+      if (userId === selfId && role !== "admin") {
+        throw new Error("You cannot remove your own administrator role");
+      }
+      return undefined;
+    });
+    const selfCtx = createAuthContext("admin");
+    const selfAdminCaller = appRouter.createCaller(selfCtx);
     await expect(
-      adminCaller.users.updateRole({ userId: 99, role: "user" }),
+      selfAdminCaller.users.updateRole({ userId: selfCtx.user!.id, role: "user" }),
     ).rejects.toThrow(/own administrator role/i);
   });
 
@@ -459,5 +480,86 @@ describe("admin users management", () => {
     expect(db.setUserActive).toHaveBeenCalledWith(7, false);
     await caller.users.setActivation({ userId: 7, isActive: true });
     expect(db.setUserActive).toHaveBeenCalledWith(7, true);
+  });
+});
+
+describe("attraction facets and filters", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("exposes category and location facets publicly", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    const f = await caller.attractions.facets();
+    expect(f).toHaveProperty("categories");
+    expect(f).toHaveProperty("locations");
+  });
+
+  it("applies combined search, category and location filters", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    await caller.attractions.searchFiltered({
+      query: "mauso",
+      category: "Monument",
+      location: "Central grounds",
+    });
+    const db = await import("./db");
+    expect(db.searchAttractionsFiltered).toHaveBeenCalledWith({
+      query: "mauso",
+      category: "Monument",
+      location: "Central grounds",
+    });
+  });
+});
+
+describe("admin audit trail", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const db = await import("./db");
+    vi.mocked(db.updateUserRole).mockImplementation(async () => undefined);
+  });
+
+  it("writes an audit event when a role is changed", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    vi.mocked(listAllUsers).mockResolvedValueOnce([
+      { id: 88, name: "Target Person", email: "target@example.com" } as never,
+    ]);
+    await caller.users.updateRole({ userId: 88, role: "admin" });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "role_change",
+        targetUserId: 88,
+        detail: expect.stringContaining("admin"),
+      }),
+    );
+  });
+
+  it("writes an audit event when an account is deactivated or reactivated", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    vi.mocked(listAllUsers).mockResolvedValueOnce([
+      { id: 99, name: "Other Person", email: "other@example.com" } as never,
+    ]);
+    await caller.users.setActivation({ userId: 99, isActive: false });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "account_deactivated", targetUserId: 99 }),
+    );
+
+    vi.mocked(listAllUsers).mockResolvedValueOnce([
+      { id: 99, name: "Other Person", email: "other@example.com" } as never,
+    ]);
+    await caller.users.setActivation({ userId: 99, isActive: true });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "account_reactivated", targetUserId: 99 }),
+    );
+  });
+
+  it("blocks non-admins from reading the audit log", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    await expect(caller.audit.list()).rejects.toThrow();
+  });
+
+  it("lets admins list audit events", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    const list = await caller.audit.list();
+    expect(Array.isArray(list)).toBe(true);
   });
 });

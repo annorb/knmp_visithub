@@ -2,6 +2,7 @@ import { and, desc, eq, gt, like, lte, sql, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   attractions,
+  auditEvents,
   bookings,
   bookingItems,
   itineraryItems,
@@ -10,6 +11,7 @@ import {
   users,
   visitorCategories,
   type InsertAttraction,
+  type InsertAuditEvent,
   type InsertBooking,
   type InsertBookingItem,
   type InsertBookingSlot,
@@ -151,6 +153,69 @@ export async function searchAttractions(query: string) {
       ),
     )
     .orderBy(attractions.sortIndex, attractions.id);
+}
+
+export async function searchAttractionsFiltered(input: {
+  query?: string;
+  category?: string;
+  location?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(attractions.isActive, true)];
+  if (input.query?.trim()) {
+    const pattern = `%${input.query.trim()}%`;
+    conditions.push(
+      sql`(${attractions.name} LIKE ${pattern} OR ${attractions.description} LIKE ${pattern})`,
+    );
+  }
+  if (input.category) {
+    conditions.push(eq(attractions.category, input.category));
+  }
+  if (input.location) {
+    conditions.push(eq(attractions.location, input.location));
+  }
+  return db
+    .select()
+    .from(attractions)
+    .where(and(...conditions))
+    .orderBy(attractions.sortIndex, attractions.id);
+}
+
+/** Distinct facet values (category, location) among active attractions with counts. */
+export async function listAttractionFacets() {
+  const db = await getDb();
+  if (!db) return { categories: [], locations: [] };
+  const rows = await db
+    .select({ category: attractions.category, location: attractions.location })
+    .from(attractions)
+    .where(eq(attractions.isActive, true));
+  const categoryCounts = new Map<string, number>();
+  const locationCounts = new Map<string, number>();
+  for (const r of rows) {
+    if (r.category) categoryCounts.set(r.category, (categoryCounts.get(r.category) ?? 0) + 1);
+    if (r.location) locationCounts.set(r.location, (locationCounts.get(r.location) ?? 0) + 1);
+  }
+  const sort = (m: Map<string, number>) =>
+    Array.from(m.entries())
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value));
+  return { categories: sort(categoryCounts), locations: sort(locationCounts) };
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+export async function createAuditEvent(event: InsertAuditEvent) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(auditEvents).values(event);
+}
+
+export async function listAuditEvents() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(auditEvents).orderBy(desc(auditEvents.createdAt)).limit(300);
 }
 
 export async function getAttractionBySlug(slug: string) {

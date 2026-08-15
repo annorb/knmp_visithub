@@ -40,7 +40,10 @@ export const attractions = mysqlTable("attractions", {
   description: text("description").notNull(),
   imageUrl: text("imageUrl"),
   openingHours: varchar("openingHours", { length: 200 }),
+  /** Free location label for filtering, e.g. "Central grounds", "Main gallery building" */
   location: varchar("location", { length: 200 }),
+  /** Free category label for filtering, e.g. "Monument", "Museum", "Gardens" */
+  category: varchar("category", { length: 100 }),
   averageVisitDurationMin: int("averageVisitDurationMin").default(30),
   sortIndex: int("sortIndex").default(0),
   isActive: boolean("isActive").default(true).notNull(),
@@ -177,3 +180,22 @@ export const itineraryItems = mysqlTable("itinerary_items", {
 
 export type ItineraryItem = typeof itineraryItems.$inferSelect;
 export type InsertItineraryItem = typeof itineraryItems.$inferInsert;
+
+/**
+ * Audit trail for administrative actions (role changes, activations, etc.).
+ */
+export const auditEvents = mysqlTable("audit_events", {
+  id: int("id").autoincrement().primaryKey(),
+  /** The admin who performed the action. */
+  actorId: int("actorId").notNull(),
+  actorName: varchar("actorName", { length: 200 }),
+  /** e.g. "role_change", "account_deactivated", "account_reactivated" */
+  action: varchar("action", { length: 64 }).notNull(),
+  targetUserId: int("targetUserId"),
+  targetName: varchar("targetName", { length: 200 }),
+  detail: text("detail"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type InsertAuditEvent = typeof auditEvents.$inferInsert;

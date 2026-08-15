@@ -198,6 +198,12 @@
   .bg-heritage {
     background-color: var(--heritage);
   }
+  .text-heritage-foreground {
+    color: #fff;
+  }
+  .border-heritage {
+    border-color: var(--heritage);
+  }
 }
 
 /* Kente-inspired thin rule */

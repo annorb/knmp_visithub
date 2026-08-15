@@ -38,7 +38,11 @@ import {
   updateUserRole,
   listMyItinerary,
   reorderItineraryItem,
+  createAuditEvent,
+  listAttractionFacets,
+  listAuditEvents,
   searchAttractions,
+  searchAttractionsFiltered,
   updateAttraction,
   updateBookingStatus,
   updateCategory,
@@ -74,6 +78,17 @@ export const appRouter = router({
     search: publicProcedure
       .input(z.object({ query: z.string().min(1).max(200) }))
       .query(({ input }) => searchAttractions(input.query)),
+    /** Filtered browsing: combined search + category + location facets. */
+    searchFiltered: publicProcedure
+      .input(
+        z.object({
+          query: z.string().max(200).optional(),
+          category: z.string().max(100).optional(),
+          location: z.string().max(200).optional(),
+        }),
+      )
+      .query(({ input }) => searchAttractionsFiltered(input)),
+    facets: publicProcedure.query(() => listAttractionFacets()),
     bySlug: publicProcedure
       .input(z.object({ slug: z.string().max(200) }))
       .query(async ({ input }) => {
@@ -347,10 +362,41 @@ export const appRouter = router({
     listAll: adminProcedure.query(() => listAllUsers()),
     updateRole: adminProcedure
       .input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "admin"]) }))
-      .mutation(({ ctx, input }) => updateUserRole(input.userId, input.role, ctx.user.id)),
+      .mutation(async ({ ctx, input }) => {
+        await updateUserRole(input.userId, input.role, ctx.user.id);
+        const target = (await listAllUsers()).find(u => u.id === input.userId);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "role_change",
+          targetUserId: input.userId,
+          targetName: target?.name ?? target?.email ?? null,
+          detail: `Role changed to ${input.role}.`,
+        });
+        return { success: true } as const;
+      }),
     setActivation: adminProcedure
       .input(z.object({ userId: z.number().int().positive(), isActive: z.boolean() }))
-      .mutation(({ input }) => setUserActive(input.userId, input.isActive)),
+      .mutation(async ({ ctx, input }) => {
+        await setUserActive(input.userId, input.isActive);
+        const target = (await listAllUsers()).find(u => u.id === input.userId);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: input.isActive ? "account_reactivated" : "account_deactivated",
+          targetUserId: input.userId,
+          targetName: target?.name ?? target?.email ?? null,
+          detail: input.isActive
+            ? "Account reactivated by administrator."
+            : "Account deactivated by administrator.",
+        });
+        return { success: true } as const;
+      }),
+  }),
+
+  /** Admin audit trail of sensitive actions. */
+  audit: router({
+    list: adminProcedure.query(() => listAuditEvents()),
   }),
 
   /** Public guided-tour time slots per attraction. */

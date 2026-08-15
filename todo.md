@@ -51,3 +51,12 @@
 - [x] Auth gating: blocked (inactive) users cannot use protected endpoints (ForbiddenError in authenticateRequest)
 - [x] Admin page: Users management (table, role change, activate/deactivate) + nav entry + route
 - [x] Tests (26 passing incl. user management) + visual verification + checkpoint
+
+## Enhancement Round 3 (user request)
+- [x] DB: audit_events table (actor, action, target, detail, timestamp) + migration applied
+- [x] DB: category field on attractions seeded (Monument/Museum/Library/Gardens/Viewpoint/Shop & Dining, locations assigned)
+- [x] Backend: audit writing on role change / activate-deactivate; admin audit list procedure
+- [x] Backend: attractions filter (search + category + location) + facets procedures
+- [x] Frontend: Explorer filter facets (category pills, location pills) + search combined, active-filter badges
+- [x] Frontend: admin Audit Log page + nav entry + route
+- [x] Tests (32 passing incl. facets, filtered search, audit writes, gating) + visual verification + checkpoint
