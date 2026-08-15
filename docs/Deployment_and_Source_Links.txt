@@ -1,0 +1,41 @@
+KNMP VisitHub — Deployment and Source Links
+============================================
+Generated: August 2026
+
+LIVE DEPLOYMENT
+---------------
+The application is hosted on Manus hosting (autoscale serverless). To publish
+the latest checkpoint, open the project in Manus and click the Publish button
+in the top-right of the Management UI.
+
+  Preview / published URL:  https://knmp-visithub.manus.space
+  (The auto-generated domain prefix may vary; the current prefix is set under
+   Settings > Domains in the Management UI. A custom domain can be purchased
+   or bound in the same panel.)
+
+SOURCE CODE
+-----------
+Source is managed inside the Manus project. Options for obtaining the code:
+
+  1. Download: Management UI (right panel) > More menu (...) > "Download as
+     ZIP" downloads the full source tree.
+  2. GitHub export: Management UI > Settings > GitHub connects the project to
+     a GitHub repository under your chosen owner; code is exported on demand
+     and can be kept in sync.
+  3. Development preview (running dev server):
+     https://3000-inm71wo24bmsn5emmhvpf-1e358cf0.us4.manus.computer
+
+PROJECT ASSETS
+--------------
+  Project ID:        ffULD8D6Fia8MAyNPUiwsL
+  Repository root:   /home/ubuntu/knmp_visithub  (Manus sandbox workspace)
+  Checkpoints (version history): Management UI > More menu (...) >
+     "Version history" — every delivered round is a named checkpoint that can
+     be rolled back.
+
+DEPENDENT SERVICES
+------------------
+  Database:   TiDB Serverless (MySQL-compatible), US East region
+  Email:      Resend transactional email (API key stored as a deployment
+              secret; managed under Settings > Secrets)
+  Auth:       Manus OAuth (no separate credential to configure)
