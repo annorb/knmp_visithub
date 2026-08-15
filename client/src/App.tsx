@@ -10,6 +10,7 @@ import AttractionDetail from "./pages/AttractionDetail";
 import Book from "./pages/Book";
 import MyBookings from "./pages/MyBookings";
 import Itinerary from "./pages/Itinerary";
+import ItineraryShare from "./pages/ItineraryShare";
 import AdminOverview from "./pages/admin/AdminOverview";
 import AdminAttractions from "./pages/admin/AdminAttractions";
 import AdminCategories from "./pages/admin/AdminCategories";
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/book"} component={Book} />
       <Route path={"/bookings"} component={MyBookings} />
       <Route path={"/itinerary"} component={Itinerary} />
+      <Route path={"/share/itinerary/:code"} component={ItineraryShare} />
       <Route path={"/admin"} component={AdminOverview} />
       <Route path={"/admin/attractions"} component={AdminAttractions} />
       <Route path={"/admin/categories"} component={AdminCategories} />

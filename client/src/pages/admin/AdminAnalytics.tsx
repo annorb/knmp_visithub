@@ -12,7 +12,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Banknote, CalendarRange, Ticket, Users } from "lucide-react";
+import { Banknote, CalendarRange, FilterX, Ticket, Users } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 
 function formatPrice(pesewas: number) {
   return `GH₵${(pesewas / 100).toFixed(2)}`;
@@ -23,12 +24,47 @@ const MONTH_LABELS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+function toDateInputValue(d: Date | null): string {
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function parseDateInput(value: string): Date | undefined {
+  if (!value) return undefined;
+  return new Date(`${value}T00:00:00.000Z`);
+}
+
 export default function AdminAnalytics() {
   const { user, isAuthenticated } = useAuth();
+  const [from, setFrom] = useState<string>("");
+  const [to, setTo] = useState<string>("");
+
+  // Stabilise the range object so it is only recreated when inputs change.
+  const range = useMemo(() => {
+    const f = parseDateInput(from);
+    const t = parseDateInput(to);
+    if (!f && !t) return undefined;
+    return { from: f, to: t };
+  }, [from, to]);
+  const rangeKey = `${from}|${to}`;
+
   const { data: breakdown, isLoading: breakdownLoading } =
-    trpc.analytics.categoryBreakdown.useQuery(undefined, { enabled: true });
+    trpc.analytics.categoryBreakdown.useQuery(range ?? undefined, {
+      enabled: true,
+      placeholderData: prev => prev,
+    });
+  const { data: stats, isLoading: statsLoading } = trpc.analytics.stats.useQuery(
+    range ?? undefined,
+    { placeholderData: prev => prev },
+  );
   const { data: trends, isLoading: trendsLoading } =
-    trpc.analytics.monthlyTrends.useQuery({ months: 6 });
+    trpc.analytics.monthlyTrends.useQuery({ months: 6, ...(range ?? {}) }, {
+      enabled: true,
+      placeholderData: prev => prev,
+    });
+  // Key queries on the range so changing inputs forces a refetch.
+  const [, setRefresh] = useState(0);
+  const applyRange = useCallback(() => setRefresh(r => r + 1), []);
 
   if (!isAuthenticated || !user) {
     return (
@@ -53,6 +89,8 @@ export default function AdminAnalytics() {
     (s, b) => s + Number(b.visitors ?? 0),
     0,
   );
+  const statsRevenue = stats?.revenuePesewas ?? null;
+  const statsBookings = stats?.total ?? null;
 
   return (
     <DashboardLayout>
@@ -64,6 +102,65 @@ export default function AdminAnalytics() {
             Cancelled bookings are excluded.
           </p>
         </div>
+
+        {/* Date-range filter */}
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5 min-w-44">
+                <label htmlFor="analytics-from" className="text-xs font-medium text-muted-foreground">
+                  From
+                </label>
+                <input
+                  id="analytics-from"
+                  type="date"
+                  value={from}
+                  onChange={e => setFrom(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <div className="space-y-1.5 min-w-44">
+                <label htmlFor="analytics-to" className="text-xs font-medium text-muted-foreground">
+                  To
+                </label>
+                <input
+                  id="analytics-to"
+                  type="date"
+                  value={to}
+                  onChange={e => setTo(e.target.value)}
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={applyRange}
+                className="inline-flex h-9 items-center justify-center rounded-md bg-heritage px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-heritage/90 transition-colors"
+              >
+                Apply range
+              </button>
+              {(from || to) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFrom("");
+                    setTo("");
+                    applyRange();
+                  }}
+                  className="inline-flex h-9 items-center gap-1.5 justify-center rounded-md border border-input px-3 text-sm text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  <FilterX className="h-3.5 w-3.5" />
+                  Clear
+                </button>
+              )}
+              {rangeKey !== "|" && (
+                <p className="text-xs text-muted-foreground">
+                  Viewing visits from {toDateInputValue(range?.from ?? new Date()) || "the beginning"}
+                  {range?.to ? ` to ${toDateInputValue(range.to)}` : " onwards"}
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* KPI strip */}
         <div className="grid gap-4 sm:grid-cols-3 mb-6">
@@ -77,7 +174,7 @@ export default function AdminAnalytics() {
                   Total revenue
                 </p>
                 <p className="font-display text-2xl font-semibold text-heritage">
-                  {breakdownLoading ? "…" : formatPrice(totalRevenue)}
+                  {breakdownLoading ? "…" : statsRevenue !== null ? formatPrice(statsRevenue) : formatPrice(totalRevenue)}
                 </p>
               </div>
             </CardContent>
@@ -92,7 +189,7 @@ export default function AdminAnalytics() {
                   Total visitors
                 </p>
                 <p className="font-display text-2xl font-semibold">
-                  {breakdownLoading ? "…" : totalVisitors.toLocaleString()}
+                  {breakdownLoading ? "…" : stats?.totalVisitors ?? 0 !== undefined ? (stats?.totalVisitors ?? totalVisitors).toLocaleString() : totalVisitors.toLocaleString()}
                 </p>
               </div>
             </CardContent>
@@ -104,12 +201,14 @@ export default function AdminAnalytics() {
               </div>
               <div>
                 <p className="text-xs uppercase tracking-wider text-muted-foreground">
-                  Bookings (6 months)
+                  Bookings{rangeKey !== "|" ? " (selected range)" : " (6 months)"}
                 </p>
                 <p className="font-display text-2xl font-semibold">
-                  {trendsLoading
+                  {statsLoading
                     ? "…"
-                    : (trends ?? []).reduce((s, t) => s + Number(t.bookings ?? 0), 0)}
+                    : statsBookings !== null
+                      ? statsBookings.toLocaleString()
+                      : (trends ?? []).reduce((s, t) => s + Number(t.bookings ?? 0), 0)}
                 </p>
               </div>
             </CardContent>
@@ -121,7 +220,8 @@ export default function AdminAnalytics() {
           <CardHeader>
             <CardTitle className="font-display text-xl">Monthly revenue trend</CardTitle>
             <CardDescription>
-              Revenue from bookings over the last {(trends ?? []).length || 6} months.
+              Revenue from bookings over the last {(trends ?? []).length || 6} months
+              {rangeKey !== "|" ? ", scoped to the selected visit-date range" : ""}.
             </CardDescription>
           </CardHeader>
           <CardContent>

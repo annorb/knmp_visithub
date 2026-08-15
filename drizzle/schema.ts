@@ -199,3 +199,18 @@ export const auditEvents = mysqlTable("audit_events", {
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
 export type InsertAuditEvent = typeof auditEvents.$inferInsert;
+
+/**
+ * Shareable links for a visitor's personal itinerary.
+ * A single code unlocks the owner's whole itinerary for a read-only view.
+ */
+export const itineraryShares = mysqlTable("itinerary_shares", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  /** Unique short code exposed in shareable URLs. */
+  shareCode: varchar("shareCode", { length: 32 }).notNull().unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ItineraryShare = typeof itineraryShares.$inferSelect;
+export type InsertItineraryShare = typeof itineraryShares.$inferInsert;

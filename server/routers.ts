@@ -39,6 +39,9 @@ import {
   listMyItinerary,
   reorderItineraryItem,
   createAuditEvent,
+  createItineraryShare,
+  listItineraryByCode,
+  getCategoryById,
   listAttractionFacets,
   listAuditEvents,
   searchAttractions,
@@ -49,6 +52,8 @@ import {
   updateItineraryItem,
 } from "./db";
 import { buildTicketPdfBuffer, type TicketData } from "./ticketPdf";
+import { buildItineraryPdfBuffer, isoDate, type ItineraryPdfData, type ItineraryRow } from "./itineraryPdf";
+import { nanoid } from "nanoid";
 import type { InsertAttraction, InsertVisitorCategory } from "../drizzle/schema";
 
 const slugify = (s: string) =>
@@ -112,9 +117,18 @@ export const appRouter = router({
           isActive: z.boolean().default(true),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const slug = slugify(input.name);
-        return createAttraction({ ...input, slug });
+        const created = await createAttraction({ ...input, slug });
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "attraction_created",
+          targetUserId: null,
+          targetName: input.name,
+          detail: `Attraction created: ${input.name}${input.location ? ` (${input.location})` : ""}`,
+        });
+        return created;
       }),
     update: adminProcedure
       .input(
@@ -130,17 +144,35 @@ export const appRouter = router({
           isActive: z.boolean().optional(),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const { id, ...data } = input;
         const payload: Partial<InsertAttraction> = { ...data };
         if (data.name) payload.slug = slugify(data.name);
+        const before = await getAttractionById(id);
         await updateAttraction(id, payload);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "attraction_updated",
+          targetUserId: null,
+          targetName: before?.name ?? input.name ?? null,
+          detail: `Attraction updated${before ? `: ${before.name}` : ""}`,
+        });
         return { success: true } as const;
       }),
     remove: adminProcedure
       .input(z.object({ id: z.number().int().positive() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        const before = await getAttractionById(input.id);
         await deleteAttraction(input.id);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "attraction_removed",
+          targetUserId: null,
+          targetName: before?.name ?? null,
+          detail: `Attraction removed${before ? `: ${before.name}` : ""}`,
+        });
         return { success: true } as const;
       }),
   }),
@@ -160,9 +192,18 @@ export const appRouter = router({
           isActive: z.boolean().default(true),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const slug = slugify(input.name);
-        return createCategory({ ...input, slug });
+        const created = await createCategory({ ...input, slug });
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "category_created",
+          targetUserId: null,
+          targetName: input.name,
+          detail: `Visitor category created: ${input.name} at GHS ${(input.pricePesewas / 100).toFixed(2)}`,
+        });
+        return created;
       }),
     update: adminProcedure
       .input(
@@ -175,17 +216,35 @@ export const appRouter = router({
           isActive: z.boolean().optional(),
         }),
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const { id, ...data } = input;
         const payload: Partial<InsertVisitorCategory> = { ...data };
         if (data.name) payload.slug = slugify(data.name);
+        const before = await getCategoryById(id);
         await updateCategory(id, payload);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "category_updated",
+          targetUserId: null,
+          targetName: before?.name ?? input.name ?? null,
+          detail: `Visitor category updated${before ? `: ${before.name}` : ""}`,
+        });
         return { success: true } as const;
       }),
     remove: adminProcedure
       .input(z.object({ id: z.number().int().positive() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        const before = await getCategoryById(input.id);
         await deleteCategory(input.id);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "category_removed",
+          targetUserId: null,
+          targetName: before?.name ?? null,
+          detail: `Visitor category removed${before ? `: ${before.name}` : ""}`,
+        });
         return { success: true } as const;
       }),
   }),
@@ -350,8 +409,17 @@ export const appRouter = router({
       }),
     setStatus: adminProcedure
       .input(z.object({ id: z.number().int().positive(), status: z.enum(["pending", "confirmed", "cancelled"]) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        const before = await getBookingById(input.id);
         await updateBookingStatus(input.id, input.status);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "booking_status_changed",
+          targetUserId: before?.userId ?? null,
+          targetName: before?.visitorName ?? before?.reference ?? null,
+          detail: `Booking ${before?.reference ?? input.id} status changed from ${before?.status ?? "?"} to ${input.status}`,
+        });
         return { success: true } as const;
       }),
     stats: adminProcedure.query(() => getBookingStats()),
@@ -448,10 +516,37 @@ export const appRouter = router({
 
   /** Admin analytics: category breakdown and monthly revenue trends. */
   analytics: router({
-    categoryBreakdown: adminProcedure.query(() => getCategoryBreakdown()),
+    categoryBreakdown: adminProcedure
+      .input(
+        z
+          .object({
+            from: z.date().optional(),
+            to: z.date().optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getCategoryBreakdown(input)),
     monthlyTrends: adminProcedure
-      .input(z.object({ months: z.number().int().min(1).max(24).default(6) }).optional())
-      .query(({ input }) => getMonthlyTrends(input?.months ?? 6)),
+      .input(
+        z
+          .object({
+            months: z.number().int().min(1).max(24).default(6),
+            from: z.date().optional(),
+            to: z.date().optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getMonthlyTrends(input?.months ?? 6, input)),
+    stats: adminProcedure
+      .input(
+        z
+          .object({
+            from: z.date().optional(),
+            to: z.date().optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getBookingStats(input)),
   }),
 
   itineraries: router({
@@ -520,7 +615,59 @@ export const appRouter = router({
         await deleteItineraryItem(input.id, ctx.user.id);
         return { success: true } as const;
       }),
+    /** Render the owner's itinerary as a printable PDF document. */
+    exportPdf: protectedProcedure.mutation(async ({ ctx }) => {
+      const items = await listMyItinerary(ctx.user.id);
+      const data: ItineraryPdfData = {
+        ownerName: ctx.user.name ?? ctx.user.email ?? null,
+        days: buildItineraryDays(items),
+        totalItems: items.length,
+      };
+      const buffer = await buildItineraryPdfBuffer(data);
+      return {
+        base64: buffer.toString("base64"),
+        filename: "KNMP-itinerary.pdf",
+      };
+    }),
+    /** Create (or refresh) a shareable link code for the owner's itinerary. */
+    share: protectedProcedure.mutation(async ({ ctx }) => {
+      const code = nanoid(10);
+      await createItineraryShare(ctx.user.id, code);
+      return { shareCode: code };
+    }),
+    /** Public read-only view of a shared itinerary (no auth required). */
+    byShareCode: publicProcedure
+      .input(z.object({ shareCode: z.string().min(1).max(32) }))
+      .query(async ({ input }) => {
+        const result = await listItineraryByCode(input.shareCode);
+        if (!result) return undefined;
+        return { days: buildItineraryDays(result.items), totalItems: result.items.length };
+      }),
   }),
 });
+
+/**
+ * Group flat itinerary items into days keyed by ISO date, ascending.
+ * Shared between the owner export PDF and the public share view.
+ */
+function buildItineraryDays(items: ItineraryRow[]) {
+  const byDate = new Map<string, ItineraryRow[]>();
+  for (const item of items) {
+    const key = isoDate(item.visitDate);
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key)!.push(item);
+  }
+  return Array.from(byDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, rows]) => ({
+      dateLabel: new Date(`${key}T00:00:00Z`).toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
+      rows,
+    }));
+}
 
 export type AppRouter = typeof appRouter;

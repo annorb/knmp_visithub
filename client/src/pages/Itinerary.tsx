@@ -24,7 +24,9 @@ import {
   ArrowUp,
   CalendarDays,
   Clock,
+  FileDown,
   Landmark,
+  Link as LinkIcon,
   LogIn,
   NotebookPen,
   Plus,
@@ -32,6 +34,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { useState } from "react";
+import { toast } from "sonner";
 
 type Item = {
   id: number;
@@ -85,6 +88,8 @@ export default function Itinerary() {
   const reorderMutation = trpc.itineraries.reorder.useMutation({
     onSettled: () => utils.itineraries.list.invalidate(),
   });
+  const exportPdfMutation = trpc.itineraries.exportPdf.useMutation();
+  const shareMutation = trpc.itineraries.share.useMutation();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
@@ -141,6 +146,38 @@ export default function Itinerary() {
     await reorderMutation.mutateAsync({ id: item.id, sortIndex: newIndex });
   };
 
+  const exportPdf = async () => {
+    try {
+      const result = await exportPdfMutation.mutateAsync();
+      const bytes = Uint8Array.from(atob(result.base64), c => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "KNMP-itinerary.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Your itinerary PDF is ready");
+    } catch {
+      toast.error("Could not export the itinerary — please try again.");
+    }
+  };
+
+  const shareItinerary = async () => {
+    try {
+      const result = await shareMutation.mutateAsync();
+      const url = `${window.location.origin}/share/itinerary/${result.shareCode}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Shareable link copied to your clipboard");
+      } catch {
+        toast.success(`Share link ready: ${url}`);
+      }
+    } catch {
+      toast.error("Could not create the share link — please try again.");
+    }
+  };
+
   if (loading) {
     return (
       <VisitorLayout>
@@ -191,6 +228,27 @@ export default function Itinerary() {
               your visit. Tip from the itinerary builder — the mausoleum, museum
               and gardens comfortably fill a morning.
             </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              size="lg"
+              className="h-12 px-6"
+              onClick={exportPdf}
+              disabled={exportPdfMutation.isPending}
+            >
+              <FileDown className="mr-2 h-4.5 w-4.5" />
+              {exportPdfMutation.isPending ? "Exporting…" : "Export PDF"}
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="h-12 px-6"
+              onClick={shareItinerary}
+              disabled={shareMutation.isPending}
+            >
+              <LinkIcon className="mr-2 h-4.5 w-4.5" />
+              {shareMutation.isPending ? "Creating link…" : "Share link"}
+            </Button>
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>

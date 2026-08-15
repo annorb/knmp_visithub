@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, like, lte, sql, gte } from "drizzle-orm";
+import { and, desc, eq, gt, gte, like, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import {
   attractions,
@@ -6,6 +6,7 @@ import {
   bookings,
   bookingItems,
   itineraryItems,
+  itineraryShares,
   tourSlots,
   bookingSlots,
   users,
@@ -432,9 +433,16 @@ export async function listAllBookings() {
   return db.select().from(bookings).orderBy(desc(bookings.createdAt));
 }
 
-export async function getBookingStats() {
+export async function getBookingStats(range?: { from?: Date; to?: Date }) {
   const db = await getDb();
   if (!db) return { total: 0, revenuePesewas: 0, upcoming: 0, cancelled: 0, totalVisitors: 0 };
+  const rangeFilter =
+    range?.from || range?.to
+      ? and(
+          range?.from ? gte(bookings.visitDate, range.from) : undefined,
+          range?.to ? lt(bookings.visitDate, range.to) : undefined,
+        )
+      : undefined;
   const statsRows = await db
     .select({
       total: sql<number>`count(*)`,
@@ -444,7 +452,8 @@ export async function getBookingStats() {
       totalVisitors: sql<number>`coalesce(sum(${bookingItems.quantity}), 0)`,
     })
     .from(bookings)
-    .leftJoin(bookingItems, eq(bookings.id, bookingItems.bookingId));
+    .leftJoin(bookingItems, eq(bookings.id, bookingItems.bookingId))
+    .where(rangeFilter);
   return (statsRows[0] ?? { total: 0, revenuePesewas: 0, upcoming: 0, cancelled: 0, totalVisitors: 0 }) as {
     total: number;
     revenuePesewas: number;
@@ -583,10 +592,18 @@ export async function getBookingSlotsByBookingId(bookingId: number) {
 // ---------------------------------------------------------------------------
 // Analytics
 // ---------------------------------------------------------------------------
-/** Visitor-category breakdown: non-cancelled bookings. */
-export async function getCategoryBreakdown() {
+/** Visitor-category breakdown: non-cancelled bookings, optionally scoped to a visit-date range. */
+export async function getCategoryBreakdown(range?: { from?: Date; to?: Date }) {
   const db = await getDb();
   if (!db) return [];
+  const rangeFilter =
+    range?.from || range?.to
+      ? and(
+          sql<boolean>`${bookings.status} != 'cancelled'`,
+          range?.from ? gte(bookings.visitDate, range.from) : undefined,
+          range?.to ? lt(bookings.visitDate, range.to) : undefined,
+        )
+      : (sql<boolean>`${bookings.status} != 'cancelled'`);
   return db
     .select({
       categoryId: bookingItems.categoryId,
@@ -596,13 +613,13 @@ export async function getCategoryBreakdown() {
     })
     .from(bookingItems)
     .innerJoin(bookings, eq(bookingItems.bookingId, bookings.id))
-    .where(sql`${bookings.status} != 'cancelled'`)
+    .where(rangeFilter)
     .groupBy(bookingItems.categoryId, bookingItems.categoryName)
     .orderBy(sql`revenuePesewas DESC`);
 }
 
-/** Monthly revenue & booking trends for the last N months (UTC calendar months). */
-export async function getMonthlyTrends(months = 6) {
+/** Monthly revenue & booking trends, optionally scoped to a visit-date range. */
+export async function getMonthlyTrends(months = 6, range?: { from?: Date; to?: Date }) {
   const db = await getDb();
   if (!db) return [];
   const rows = await db
@@ -616,11 +633,47 @@ export async function getMonthlyTrends(months = 6) {
     .leftJoin(bookingItems, eq(bookings.id, bookingItems.bookingId))
     .where(
       and(
-        sql`${bookings.status} != 'cancelled'`,
+        sql<boolean>`${bookings.status} != 'cancelled'`,
         gt(bookings.createdAt, sql`date_sub(now(), interval ${months} month)`),
+        range?.from ? gte(bookings.visitDate, range.from) : undefined,
+        range?.to ? lt(bookings.visitDate, range.to) : undefined,
       ),
     )
     .groupBy(sql`date_format(${bookings.createdAt}, '%Y-%m')`)
     .orderBy(sql`month ASC`);
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Itinerary share links
+// ---------------------------------------------------------------------------
+export async function createItineraryShare(userId: number, shareCode: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database unavailable");
+  await db.delete(itineraryShares).where(eq(itineraryShares.userId, userId));
+  await db.insert(itineraryShares).values({ userId, shareCode });
+}
+
+export async function getItineraryShareOwner(shareCode: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db
+    .select({ userId: itineraryShares.userId })
+    .from(itineraryShares)
+    .where(eq(itineraryShares.shareCode, shareCode))
+    .limit(1);
+  return rows[0]?.userId;
+}
+
+export async function listItineraryByCode(shareCode: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const owner = await getItineraryShareOwner(shareCode);
+  if (!owner) return undefined;
+  const items = await db
+    .select()
+    .from(itineraryItems)
+    .where(eq(itineraryItems.userId, owner))
+    .orderBy(itineraryItems.visitDate, itineraryItems.sortIndex, itineraryItems.id);
+  return { userId: owner, items };
 }

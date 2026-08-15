@@ -5,7 +5,17 @@ import type {
   listAuditEvents,
   searchAttractionsFiltered,
 } from "./db";
-import { createAuditEvent, listAllUsers } from "./db";
+import {
+  createAuditEvent,
+  createItineraryShare,
+  getCategoryBreakdown,
+  getCategoryById,
+  getAttractionById,
+  getBookingById,
+  getMonthlyTrends,
+  listAllUsers,
+  listItineraryByCode,
+} from "./db";
 import type { TrpcContext } from "./_core/context";
 import { appRouter } from "./routers";
 
@@ -129,6 +139,8 @@ vi.mock("./db", async importOriginal => {
     listAuditEvents: vi.fn(async () => []),
     listAttractionFacets: vi.fn(async () => ({ categories: [], locations: [] })),
     searchAttractionsFiltered: vi.fn(async () => []) as ReturnType<typeof vi.fn>,
+    createItineraryShare: vi.fn(async () => undefined),
+    listItineraryByCode: vi.fn(async () => undefined) as ReturnType<typeof vi.fn>,
   };
 });
 
@@ -561,5 +573,174 @@ describe("admin audit trail", () => {
     const caller = appRouter.createCaller(createAuthContext("admin"));
     const list = await caller.audit.list();
     expect(Array.isArray(list)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 4: itinerary export & share, extended audit trail, analytics ranges
+// ---------------------------------------------------------------------------
+describe("itineraries.exportPdf & share (protected)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("requires authentication to export or share the itinerary", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    await expect(caller.itineraries.exportPdf()).rejects.toThrow();
+    await expect(caller.itineraries.share()).rejects.toThrow();
+  });
+
+  it("lets signed-in visitors export their itinerary as a PDF buffer", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    const result = await caller.itineraries.exportPdf();
+    expect(result.base64).toBeTruthy();
+    expect(result.filename).toBe("KNMP-itinerary.pdf");
+    const decoded = Buffer.from(result.base64, "base64").toString("utf8");
+    expect(decoded.slice(0, 4)).toBe("%PDF");
+  });
+
+  it("generates a shareable link code for the owner's itinerary", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    const result = await caller.itineraries.share();
+    expect(result.shareCode).toMatch(/^[A-Za-z0-9_-]{10}$/);
+    expect(createItineraryShare).toHaveBeenCalled();
+  });
+});
+
+describe("itineraries.byShareCode (public)", () => {
+  it("is readable without authentication", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    vi.mocked(listItineraryByCode as () => unknown).mockResolvedValueOnce({
+      userId: 7,
+      items: [],
+    } as never);
+    const result = await caller.itineraries.byShareCode({ shareCode: "abc123" });
+    expect(result).toEqual({ days: [], totalItems: 0 });
+  });
+
+  it("returns undefined for an invalid share code", async () => {
+    const caller = appRouter.createCaller(createPublicContext());
+    vi.mocked(listItineraryByCode as () => unknown).mockResolvedValueOnce(undefined);
+    const result = await caller.itineraries.byShareCode({ shareCode: "nope" });
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("extended audit trail (attractions, categories, bookings)", () => {
+  let actorId = 0;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actorId += 1000;
+  });
+
+  function adminCtx(): TrpcContext {
+    return createBaseContext({
+      user: {
+        id: actorId,
+        openId: `admin-${actorId}`,
+        email: `admin-${actorId}@example.com`,
+        name: "Admin",
+        loginMethod: "manus",
+        role: "admin",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        lastSignedIn: new Date(),
+      } as AuthenticatedUser,
+    });
+  }
+
+  it("writes audit events when an attraction is created, updated and removed", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    vi.mocked(getAttractionById as () => unknown)
+      .mockResolvedValueOnce({ id: 1, name: "Mausoleum" } as never)
+      .mockResolvedValueOnce({ id: 1, name: "Mausoleum" } as never);
+    await caller.attractions.create({
+      name: "New Pavilion",
+      description: "desc",
+      isActive: true,
+      sortIndex: 0,
+    });
+    await caller.attractions.update({ id: 1, name: "Mausoleum (Updated)" });
+    await caller.attractions.remove({ id: 1 });
+    const actions = vi.mocked(createAuditEvent as () => unknown).mock.calls.map(
+      c => (c[0] as { action: string }).action,
+    );
+    expect(actions).toEqual(["attraction_created", "attraction_updated", "attraction_removed"]);
+  });
+
+  it("writes audit events when a visitor category is created, updated and removed", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    const getCategoryByIdMock = vi.fn(getCategoryById);
+    const db = await import("./db");
+    vi.mocked(db).getCategoryById = getCategoryByIdMock as never;
+    getCategoryByIdMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ id: 5, name: "Senior" } as never)
+      .mockResolvedValueOnce({ id: 5, name: "Senior" } as never);
+    await caller.categories.create({
+      name: "Senior",
+      pricePesewas: 800,
+      isActive: true,
+      sortIndex: 0,
+    });
+    await caller.categories.update({ id: 5, name: "Senior Citizen" });
+    await caller.categories.remove({ id: 5 });
+    const actions = vi.mocked(createAuditEvent as () => unknown).mock.calls.map(
+      c => (c[0] as { action: string }).action,
+    );
+    expect(actions).toEqual(["category_created", "category_updated", "category_removed"]);
+  });
+
+  it("writes an audit event when a booking status changes", async () => {
+    const caller = appRouter.createCaller(adminCtx());
+    vi.mocked(getBookingById as () => unknown).mockResolvedValueOnce({
+      id: 21,
+      userId: 88,
+      reference: "KNMP-ABC123",
+      visitorName: "Ama",
+      status: "pending",
+    } as never);
+    await caller.bookings.setStatus({ id: 21, status: "confirmed" });
+    expect(createAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "booking_status_changed",
+        targetUserId: 88,
+        detail: expect.stringContaining("confirmed"),
+      }),
+    );
+  });
+
+  it("blocks non-admins from writing attraction, category and booking audit entries", async () => {
+    const caller = appRouter.createCaller(createAuthContext("user"));
+    await expect(
+      caller.attractions.create({ name: "x", description: "x", isActive: true, sortIndex: 0 }),
+    ).rejects.toThrow();
+    await expect(caller.bookings.setStatus({ id: 1, status: "confirmed" })).rejects.toThrow();
+    expect(vi.mocked(createAuditEvent as () => unknown).mock.calls.length).toBe(0);
+  });
+});
+
+describe("analytics date-range parameters", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("passes the visit-date range to the category breakdown", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    const from = new Date(Date.UTC(2026, 5, 1));
+    const to = new Date(Date.UTC(2026, 6, 1));
+    await caller.analytics.categoryBreakdown({ from, to });
+    expect(getCategoryBreakdown).toHaveBeenCalledWith({ from, to });
+  });
+
+  it("passes the range through to monthly trends alongside the month window", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    const from = new Date(Date.UTC(2026, 0, 1));
+    await caller.analytics.monthlyTrends({ months: 3, from });
+    expect(getMonthlyTrends).toHaveBeenCalledWith(3, { months: 3, from });
+  });
+
+  it("defaults to full history when no range is supplied", async () => {
+    const caller = appRouter.createCaller(createAuthContext("admin"));
+    await caller.analytics.categoryBreakdown();
+    expect(getCategoryBreakdown).toHaveBeenCalledWith(undefined);
+    await caller.analytics.monthlyTrends();
+    expect(getMonthlyTrends).toHaveBeenCalledWith(6, undefined);
   });
 });

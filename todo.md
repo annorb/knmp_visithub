@@ -60,3 +60,12 @@
 - [x] Frontend: Explorer filter facets (category pills, location pills) + search combined, active-filter badges
 - [x] Frontend: admin Audit Log page + nav entry + route
 - [x] Tests (32 passing incl. facets, filtered search, audit writes, gating) + visual verification + checkpoint
+
+## Enhancement Round 4 (user request)
+- [x] Backend: itinerary PDF generation (server/itineraryPdf.ts) + exportPdf endpoint (owner-only)
+- [x] Backend: shareable itinerary link (itinerary_shares table, public byShareCode endpoint) — /share/itinerary/:code
+- [x] Backend: audit writes for attractions CRUD, visitor categories CRUD, booking status updates (attraction_* / category_* / booking_status_changed)
+- [x] Backend: analytics endpoints accept optional date range (from/to) parameters
+- [x] Frontend: Itinerary page export-to-PDF and copy-share-link actions
+- [x] Frontend: admin Analytics date-range picker (start/end dates) applied to breakdown + trends + KPIs
+- [x] Tests (44 passing incl. export/share, extended audit trail, analytics range) + visual verification + checkpoint
