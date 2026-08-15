@@ -11,7 +11,16 @@ export type TicketData = {
   totalPesewas: number;
   totalVisitors: number;
   status: string;
-  items: { categoryName: string; quantity: number; unitPricePesewas: number; subtotalPesewas: number }[];
+  items: {
+    categoryName: string;
+    quantity: number;
+    unitPricePesewas: number;
+    subtotalPesewas: number;
+    discountPesewas?: number;
+    discountPercent?: number;
+  }[];
+  /** Total group/school package discount applied to the booking, in pesewas. */
+  totalDiscountPesewas?: number;
   slots: {
     attractionId?: number | null;
     attractionName: string | null;
@@ -142,15 +151,43 @@ async function emitDocument(
 
   doc.font("Helvetica").fontSize(10).fillColor(ink);
   for (const item of data.items) {
-    doc.text(item.categoryName, 56, tableY, { width: colX[1] - 64 });
+    const label =
+      item.discountPercent && item.discountPercent > 0
+        ? `${item.categoryName} (group rate −${item.discountPercent}% when ${item.quantity >= 10 ? "group size reached" : "min. group reached"})`
+        : item.categoryName;
+    doc.text(label, 56, tableY, { width: colX[1] - 64 });
     doc.text(String(item.quantity), colX[1], tableY, { width: colX[2] - colX[1] - 8 });
     doc.text(fmtGhs(item.unitPricePesewas), colX[2], tableY, { width: colX[3] - colX[2] - 8 });
     doc.text(fmtGhs(item.subtotalPesewas), colX[3], tableY, { align: "right" });
     tableY += 18;
+    if (item.discountPesewas && item.discountPesewas > 0) {
+      doc.fillColor("#b45309").text(
+        `Group package discount`,
+        56,
+        tableY,
+        { width: colX[1] - 64 },
+      );
+      doc.text(
+        `−${fmtGhs(item.discountPesewas)}`,
+        colX[3],
+        tableY,
+        { align: "right" },
+      );
+      tableY += 16;
+      doc.fillColor(ink);
+    }
+  }
+  if (data.totalDiscountPesewas && data.totalDiscountPesewas > 0) {
+    thinLine(doc, tableY + 2);
+    tableY += 10;
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#b45309");
+    doc.text("Group/school package discount", 56, tableY);
+    doc.text(`−${fmtGhs(data.totalDiscountPesewas)}`, colX[3], tableY, { align: "right" });
+    tableY += 16;
   }
   thinLine(doc, tableY + 2);
   tableY += 12;
-  doc.font("Helvetica-Bold").fontSize(12);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor(ink);
   doc.text("Total Paid", 56, tableY);
   doc.fillColor(green).text(fmtGhs(data.totalPesewas), colX[3], tableY, { align: "right" });
   tableY += 28;

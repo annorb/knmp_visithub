@@ -108,3 +108,12 @@
 
 ## GitHub export (user request)
 - [x] Export KNMP VisitHub source to the user's GitHub account (full history pushed via SSH to annorb/knmp_visithub)
+
+## Enhancement Round 8 (user request)
+- [x] Park coordinates: added lat/lng columns to attractions (migration 0007) + seeded realistic coordinates around the park centroid (5.5510 N, -0.2108 W)
+- [x] Public attractions.list returns lat/lng; admin attractions CRUD accepts coordinates
+- [x] Explorer page: interactive Google Map view (MapView) with markers for all attractions, info windows, filter-aware marker highlighting, toggle between list and map view
+- [x] Group/school package: added isGroup/groupMinQty/groupDiscountPercent to visitor_categories (migrations 0008 + 0009 discount columns on booking_items); computeGroupDiscount applies per-line group discount at minimum group size in calculateCost and booking creation
+- [x] Booking form: group booking package hints on category cards (e.g. "20% group rate from 15 visitors") + discount lines in live cost summary; admin categories form manages group settings
+- [x] Itinerary PDF export: exportPdf verified working; filename enhanced to KNMP-itinerary-YYYY-MM-DD.pdf
+- [x] Tests for Round 8 (server/round8.test.ts: group discount calc, lat/lng bounds, exportPdf presence) + visual verification + checkpoint — 80 tests passing

@@ -27,6 +27,9 @@ type Category = {
   description: string | null;
   pricePesewas: number;
   isActive: boolean;
+  isGroup: boolean;
+  groupMinQty: number | null;
+  groupDiscountPercent: number | null;
   sortIndex: number | null;
 };
 
@@ -64,6 +67,9 @@ export default function AdminCategories() {
     description: "",
     priceCedis: "",
     isActive: true,
+    isGroup: false,
+    groupMinQty: "15",
+    groupDiscountPercent: "15",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +80,9 @@ export default function AdminCategories() {
       description: c?.description ?? "",
       priceCedis: c ? String(c.pricePesewas / 100) : "",
       isActive: c?.isActive ?? true,
+      isGroup: c?.isGroup ?? false,
+      groupMinQty: c?.groupMinQty != null ? String(c.groupMinQty) : "15",
+      groupDiscountPercent: c?.groupDiscountPercent != null ? String(c.groupDiscountPercent) : "15",
     });
     setError(null);
     setDialogOpen(true);
@@ -83,6 +92,15 @@ export default function AdminCategories() {
     setForm(prev => ({ ...prev, [field]: value }));
     setError(null);
   };
+
+  const groupDiscountPreview = (() => {
+    if (!form.isGroup) return 0;
+    const min = Number(form.groupMinQty) || 15;
+    const pct = Math.min(100, Math.max(0, Number(form.groupDiscountPercent) || 0));
+    const price = Number(form.priceCedis);
+    if (!Number.isFinite(price) || price <= 0) return 0;
+    return Math.round((price * 100 * min * pct) / 100);
+  })();
 
   const save = async () => {
     if (!form.name.trim()) {
@@ -99,6 +117,9 @@ export default function AdminCategories() {
       description: form.description.trim(),
       pricePesewas: Math.round(price * 100),
       isActive: form.isActive,
+      isGroup: form.isGroup,
+      groupMinQty: Math.max(2, Number(form.groupMinQty) || 15),
+      groupDiscountPercent: Math.min(100, Math.max(0, Number(form.groupDiscountPercent) || 0)),
     } as const;
     try {
       if (editing) {
@@ -190,6 +211,61 @@ export default function AdminCategories() {
                     </label>
                   </div>
                 </div>
+                <div className="rounded-lg border border-gold/50 bg-secondary/50 p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold flex items-center gap-1.5">
+                      <Tags className="h-4 w-4 text-heritage" />
+                      Group &amp; school package
+                    </p>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <Switch checked={form.isGroup} onCheckedChange={v => set("isGroup", v)} />
+                      Enable
+                    </label>
+                  </div>
+                  {form.isGroup && (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="groupMinQty">Minimum group size</Label>
+                          <Input
+                            id="groupMinQty"
+                            type="number"
+                            min={2}
+                            value={form.groupMinQty}
+                            onChange={e => set("groupMinQty", e.target.value)}
+                            placeholder="15"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="groupDiscount">Discount (%)</Label>
+                          <Input
+                            id="groupDiscount"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={form.groupDiscountPercent}
+                            onChange={e => set("groupDiscountPercent", e.target.value)}
+                            placeholder="15"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        When a single category has at least {Number(form.groupMinQty) || 15} visitors,
+                        each visitor in that category receives a{" "}
+                        {Math.min(100, Math.max(0, Number(form.groupDiscountPercent) || 0))}% discount.
+                        {groupDiscountPreview > 0 && (
+                          <>
+                            {" "}At the minimum group size, that saves{" "}
+                            <span className="font-medium text-heritage">
+                              GH₵{(groupDiscountPreview / 100).toFixed(2)}
+                            </span>{" "}
+                            on this line.
+                          </>
+                        )}
+                      </p>
+                    </>
+                  )}
+                </div>
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </div>
               <DialogFooter>
@@ -229,6 +305,11 @@ export default function AdminCategories() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium">{c.name}</p>
+                        {c.isGroup && (
+                          <span className="text-xs bg-gold/15 text-amber-700 rounded-full px-2 py-0.5 font-medium">
+                            Group −{c.groupDiscountPercent ?? 15}% from {c.groupMinQty ?? 15}
+                          </span>
+                        )}
                         {!c.isActive && (
                           <span className="text-xs bg-destructive/10 text-destructive rounded-full px-2 py-0.5">
                             Hidden

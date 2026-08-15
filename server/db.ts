@@ -642,7 +642,7 @@ export async function getCategoryBreakdown(range?: { from?: Date; to?: Date }) {
       categoryId: bookingItems.categoryId,
       categoryName: bookingItems.categoryName,
       visitors: sql<number>`coalesce(sum(${bookingItems.quantity}), 0)`,
-      revenuePesewas: sql<number>`coalesce(sum(${bookingItems.subtotalPesewas}), 0)`,
+      revenuePesewas: sql<number>`coalesce(sum(${bookingItems.subtotalPesewas} - ${bookingItems.discountPesewas}), 0)`,
     })
     .from(bookingItems)
     .innerJoin(bookings, eq(bookingItems.bookingId, bookings.id))

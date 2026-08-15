@@ -592,7 +592,7 @@ describe("itineraries.exportPdf & share (protected)", () => {
     const caller = appRouter.createCaller(createAuthContext("user"));
     const result = await caller.itineraries.exportPdf();
     expect(result.base64).toBeTruthy();
-    expect(result.filename).toBe("KNMP-itinerary.pdf");
+    expect(result.filename).toMatch(/^KNMP-itinerary-\d{4}-\d{2}-\d{2}\.pdf$/);
     const decoded = Buffer.from(result.base64, "base64").toString("utf8");
     expect(decoded.slice(0, 4)).toBe("%PDF");
   });

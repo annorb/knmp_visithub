@@ -31,6 +31,8 @@ type Attraction = {
   averageVisitDurationMin: number | null;
   sortIndex: number | null;
   isActive: boolean;
+  lat: number | string | null;
+  lng: number | string | null;
 };
 
 export default function AdminAttractions() {
@@ -64,6 +66,8 @@ export default function AdminAttractions() {
     imageUrl: "",
     openingHours: "",
     location: "",
+    lat: "",
+    lng: "",
     averageVisitDurationMin: "",
     isActive: true,
   });
@@ -77,6 +81,8 @@ export default function AdminAttractions() {
       imageUrl: a?.imageUrl ?? "",
       openingHours: a?.openingHours ?? "",
       location: a?.location ?? "",
+      lat: a?.lat !== null && a?.lat !== undefined ? String(a.lat) : "",
+      lng: a?.lng !== null && a?.lng !== undefined ? String(a.lng) : "",
       averageVisitDurationMin: a?.averageVisitDurationMin ? String(a.averageVisitDurationMin) : "",
       isActive: a?.isActive ?? true,
     });
@@ -100,6 +106,8 @@ export default function AdminAttractions() {
       imageUrl: form.imageUrl.trim() || null,
       openingHours: form.openingHours.trim() || null,
       location: form.location.trim() || null,
+      lat: form.lat.trim() ? Number(form.lat) : null,
+      lng: form.lng.trim() ? Number(form.lng) : null,
       averageVisitDurationMin: form.averageVisitDurationMin ? Number(form.averageVisitDurationMin) : undefined,
       isActive: form.isActive,
     } as const;
@@ -200,6 +208,27 @@ export default function AdminAttractions() {
                       onChange={e => set("location", e.target.value)}
                       placeholder="e.g. Central grounds"
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Latitude</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={form.lat}
+                      onChange={e => set("lat", e.target.value)}
+                      placeholder="e.g. 5.5510"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Longitude</Label>
+                    <Input
+                      type="number"
+                      step="any"
+                      value={form.lng}
+                      onChange={e => set("lng", e.target.value)}
+                      placeholder="e.g. -0.2108"
+                    />
+                    <p className="text-xs text-muted-foreground">Shown as a pin on the park map.</p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Avg. visit (min)</Label>

@@ -1,4 +1,5 @@
 import VisitorLayout from "@/components/VisitorLayout";
+import { ParkMapView } from "@/components/ParkMapView";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,7 +9,9 @@ import {
   Clock,
   Landmark,
   MapPin,
+  Map as MapIcon,
   Search,
+  LayoutGrid,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "wouter";
@@ -78,6 +81,7 @@ export default function Explore() {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [location, setLocation] = useState<string | null>(null);
+  const [view, setView] = useState<"list" | "map">("list");
   const { data: facets } = trpc.attractions.facets.useQuery();
   const { data: filtered, isLoading: searching } =
     trpc.attractions.searchFiltered.useQuery(
@@ -103,6 +107,14 @@ export default function Explore() {
   const isActive =
     query.trim().length >= 2 || category !== null || location !== null;
   const searchingAny = loadingAll || (isActive && searching);
+
+  const activeSlugs = useMemo(
+    () =>
+      isActive
+        ? (filtered ?? []).map(a => a.slug)
+        : null,
+    [isActive, filtered],
+  );
 
   return (
     <VisitorLayout>
@@ -195,7 +207,43 @@ export default function Explore() {
           </div>
         )}
 
-        {searchingAny ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <p className="text-sm text-muted-foreground">
+            {results.length} attraction{results.length === 1 ? "" : "s"}{isActive ? " matching your filters" : " in the park"}
+          </p>
+          <div className="inline-flex rounded-lg border border-border bg-card p-1 text-xs font-medium">
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                view === "list"
+                  ? "bg-heritage text-heritage-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" /> List
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("map")}
+              className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                view === "map"
+                  ? "bg-heritage text-heritage-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <MapIcon className="h-3.5 w-3.5" /> Map
+            </button>
+          </div>
+        </div>
+
+        {view === "map" ? (
+          <ParkMapView
+            attractions={results}
+            activeSlugs={activeSlugs}
+            isLoading={searchingAny}
+          />
+        ) : searchingAny ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {[0, 1, 2, 3, 4, 5].map(i => (
               <Skeleton key={i} className="h-72 w-full" />

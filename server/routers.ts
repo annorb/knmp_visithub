@@ -80,6 +80,25 @@ const slugify = (s: string) =>
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-");
 
+/**
+ * Group/school booking package discount. A visitor category marked as a group
+ * category receives a percentage discount once the party quantity for that
+ * category reaches the configured minimum group size.
+ */
+const computeGroupDiscount = (
+  cat: { isGroup: boolean; groupMinQty: number | null; groupDiscountPercent: number | null },
+  quantity: number,
+  basePesewas: number,
+): { discountPesewas: number; discountPercent: number } => {
+  const minQty = cat.isGroup ? (cat.groupMinQty ?? 15) : 0;
+  const percent = cat.isGroup ? Math.min(100, Math.max(0, cat.groupDiscountPercent ?? 0)) : 0;
+  if (!cat.isGroup || quantity < minQty || percent <= 0) {
+    return { discountPesewas: 0, discountPercent: 0 };
+  }
+  const discountPesewas = Math.round((basePesewas * percent) / 100);
+  return { discountPesewas, discountPercent: percent };
+};
+
 const dateOnly = (d: Date) =>
   new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
 
@@ -128,6 +147,20 @@ export const appRouter = router({
           imageUrl: z.string().max(2000).optional().nullable(),
           openingHours: z.string().max(200).optional().nullable(),
           location: z.string().max(200).optional().nullable(),
+          lat: z
+            .number()
+            .min(-90)
+            .max(90)
+            .optional()
+            .nullable()
+            .default(null),
+          lng: z
+            .number()
+            .min(-180)
+            .max(180)
+            .optional()
+            .nullable()
+            .default(null),
           averageVisitDurationMin: z.number().int().min(5).max(720).default(30),
           sortIndex: z.number().int().default(0),
           isActive: z.boolean().default(true),
@@ -135,7 +168,12 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const slug = slugify(input.name);
-        const created = await createAttraction({ ...input, slug });
+        const created = await createAttraction({
+          ...input,
+          slug,
+          lat: input.lat === null ? null : input.lat !== undefined ? String(input.lat) : null,
+          lng: input.lng === null ? null : input.lng !== undefined ? String(input.lng) : null,
+        });
         await createAuditEvent({
           actorId: ctx.user.id,
           actorName: ctx.user.name ?? ctx.user.email ?? null,
@@ -155,6 +193,8 @@ export const appRouter = router({
           imageUrl: z.string().max(2000).nullable().optional(),
           openingHours: z.string().max(200).nullable().optional(),
           location: z.string().max(200).nullable().optional(),
+          lat: z.number().min(-90).max(90).nullable().optional(),
+          lng: z.number().min(-180).max(180).nullable().optional(),
           averageVisitDurationMin: z.number().int().min(5).max(720).optional(),
           sortIndex: z.number().int().optional(),
           isActive: z.boolean().optional(),
@@ -162,7 +202,12 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const { id, ...data } = input;
-        const payload: Partial<InsertAttraction> = { ...data };
+        const payload: Partial<InsertAttraction> = {
+          ...data,
+          // Drizzle `decimal` columns carry numeric input as strings in MySQL.
+          lat: data.lat === undefined ? undefined : data.lat === null ? null : String(data.lat),
+          lng: data.lng === undefined ? undefined : data.lng === null ? null : String(data.lng),
+        };
         if (data.name) payload.slug = slugify(data.name);
         const before = await getAttractionById(id);
         await updateAttraction(id, payload);
@@ -206,6 +251,9 @@ export const appRouter = router({
           pricePesewas: z.number().int().min(0).max(100_000_00),
           sortIndex: z.number().int().default(0),
           isActive: z.boolean().default(true),
+          isGroup: z.boolean().default(false),
+          groupMinQty: z.number().int().min(2).max(1000).default(15),
+          groupDiscountPercent: z.number().int().min(0).max(100).default(15),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -217,7 +265,9 @@ export const appRouter = router({
           action: "category_created",
           targetUserId: null,
           targetName: input.name,
-          detail: `Visitor category created: ${input.name} at GHS ${(input.pricePesewas / 100).toFixed(2)}`,
+          detail: input.isGroup
+            ? `Visitor category created: ${input.name} at GHS ${(input.pricePesewas / 100).toFixed(2)} with group package −${input.groupDiscountPercent}% from ${input.groupMinQty} visitors`
+            : `Visitor category created: ${input.name} at GHS ${(input.pricePesewas / 100).toFixed(2)}`,
         });
         return created;
       }),
@@ -230,6 +280,9 @@ export const appRouter = router({
           pricePesewas: z.number().int().min(0).max(100_000_00).optional(),
           sortIndex: z.number().int().optional(),
           isActive: z.boolean().optional(),
+          isGroup: z.boolean().optional(),
+          groupMinQty: z.number().int().min(2).max(1000).optional(),
+          groupDiscountPercent: z.number().int().min(0).max(100).optional(),
         }),
       )
       .mutation(async ({ ctx, input }) => {
@@ -311,12 +364,22 @@ export const appRouter = router({
         const catMap = new Map(categories.map(c => [c.id, c]));
         const items = input.lines.map(line => {
           const cat = catMap.get(line.categoryId)!;
-          const subtotal = cat.pricePesewas * line.quantity;
-          return { categoryId: cat.id, categoryName: cat.name, unitPricePesewas: cat.pricePesewas, quantity: line.quantity, subtotalPesewas: subtotal };
+          const base = cat.pricePesewas * line.quantity;
+          const discount = computeGroupDiscount(cat, line.quantity, base);
+          return {
+            categoryId: cat.id,
+            categoryName: cat.name,
+            unitPricePesewas: cat.pricePesewas,
+            quantity: line.quantity,
+            subtotalPesewas: base,
+            discountPesewas: discount.discountPesewas,
+            discountPercent: discount.discountPercent,
+          };
         });
-        const totalPesewas = items.reduce((sum, i) => sum + i.subtotalPesewas, 0);
+        const totalPesewas = items.reduce((sum, i) => sum + i.subtotalPesewas - i.discountPesewas, 0);
+        const totalDiscountPesewas = items.reduce((sum, i) => sum + i.discountPesewas, 0);
         const totalVisitors = items.reduce((sum, i) => sum + i.quantity, 0);
-        return { items, totalPesewas, totalVisitors };
+        return { items, totalPesewas, totalDiscountPesewas, totalVisitors };
       }),
 
     create: publicProcedure
@@ -359,9 +422,19 @@ export const appRouter = router({
         const catMap = new Map(categories.map(c => [c.id, c]));
         const items = input.lines.map(line => {
           const cat = catMap.get(line.categoryId)!;
-          return { categoryId: cat.id, categoryName: cat.name, unitPricePesewas: cat.pricePesewas, quantity: line.quantity, subtotalPesewas: cat.pricePesewas * line.quantity };
+          const base = cat.pricePesewas * line.quantity;
+          const discount = computeGroupDiscount(cat, line.quantity, base);
+          return {
+            categoryId: cat.id,
+            categoryName: cat.name,
+            unitPricePesewas: cat.pricePesewas,
+            quantity: line.quantity,
+            subtotalPesewas: base,
+            discountPesewas: discount.discountPesewas,
+            discountPercent: discount.discountPercent,
+          };
         });
-        const totalPesewas = items.reduce((sum, i) => sum + i.subtotalPesewas, 0);
+        const totalPesewas = items.reduce((sum, i) => sum + i.subtotalPesewas - i.discountPesewas, 0);
         const reference = await generateUniqueReference();
         const bookingId = await createBooking({
           userId: ctx.user.id,
@@ -899,9 +972,10 @@ export const appRouter = router({
         totalItems: items.length,
       };
       const buffer = await buildItineraryPdfBuffer(data);
+      const dateStamp = new Date().toISOString().slice(0, 10);
       return {
         base64: buffer.toString("base64"),
-        filename: "KNMP-itinerary.pdf",
+        filename: `KNMP-itinerary-${dateStamp}.pdf`,
       };
     }),
     /** Create (or refresh) a shareable link code for the owner's itinerary. */

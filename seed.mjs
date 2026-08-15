@@ -25,6 +25,8 @@ const attractions = [
     location: "Central grounds",
     averageVisitDurationMin: 45,
     sortIndex: 0,
+    lat: 5.5503512,
+    lng: -0.2112435,
   },
   {
     name: "Museum & Gallery",
@@ -36,6 +38,8 @@ const attractions = [
     location: "Main gallery building",
     averageVisitDurationMin: 60,
     sortIndex: 1,
+    lat: 5.5507843,
+    lng: -0.2105628,
   },
   {
     name: "Presidential Library",
@@ -47,6 +51,8 @@ const attractions = [
     location: "Library wing",
     averageVisitDurationMin: 40,
     sortIndex: 2,
+    lat: 5.5509621,
+    lng: -0.2101287,
   },
   {
     name: "Statues & Fountains",
@@ -59,6 +65,8 @@ const attractions = [
     location: "Memorial forecourt",
     averageVisitDurationMin: 30,
     sortIndex: 3,
+    lat: 5.5512074,
+    lng: -0.2108956,
   },
   {
     name: "Gardens & Pool",
@@ -70,6 +78,8 @@ const attractions = [
     location: "Park grounds",
     averageVisitDurationMin: 30,
     sortIndex: 4,
+    lat: 5.5500298,
+    lng: -0.2106714,
   },
   {
     name: "Audio-Visual Tunnel",
@@ -81,6 +91,8 @@ const attractions = [
     location: "Exhibition hall",
     averageVisitDurationMin: 20,
     sortIndex: 5,
+    lat: 5.5506184,
+    lng: -0.2110502,
   },
   {
     name: "Founders' Hall Viewpoint",
@@ -92,6 +104,8 @@ const attractions = [
     location: "North grounds",
     averageVisitDurationMin: 20,
     sortIndex: 6,
+    lat: 5.5514327,
+    lng: -0.2103119,
   },
   {
     name: "Gift Shop & Restaurant",
@@ -103,6 +117,8 @@ const attractions = [
     location: "Park entrance",
     averageVisitDurationMin: 30,
     sortIndex: 7,
+    lat: 5.5498056,
+    lng: -0.2109843,
   },
 ];
 
@@ -169,9 +185,9 @@ for (const a of attractions) {
   const [existing] = await conn.execute("SELECT id FROM attractions WHERE slug = ?", [a.slug]);
   if (!existing.length) {
     await conn.execute(
-      `INSERT INTO attractions (name, slug, description, imageUrl, openingHours, location, averageVisitDurationMin, sortIndex, isActive)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      [a.name, a.slug, a.description, a.imageUrl, a.openingHours, a.location, a.averageVisitDurationMin, a.sortIndex],
+      `INSERT INTO attractions (name, slug, description, imageUrl, openingHours, location, lat, lng, averageVisitDurationMin, sortIndex, isActive)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [a.name, a.slug, a.description, a.imageUrl, a.openingHours, a.location, a.lat, a.lng, a.averageVisitDurationMin, a.sortIndex],
     );
     console.log(`Seeded attraction: ${a.name}`);
   }

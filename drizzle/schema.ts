@@ -44,6 +44,10 @@ export const attractions = mysqlTable("attractions", {
   location: varchar("location", { length: 200 }),
   /** Free category label for filtering, e.g. "Monument", "Museum", "Gardens" */
   category: varchar("category", { length: 100 }),
+  /** Park-map latitude (WGS84), e.g. 5.5510 for the KNMP centroid area. */
+  lat: decimal("lat", { precision: 10, scale: 7 }),
+  /** Park-map longitude (WGS84), e.g. -0.2108 for the KNMP centroid area. */
+  lng: decimal("lng", { precision: 10, scale: 7 }),
   averageVisitDurationMin: int("averageVisitDurationMin").default(30),
   sortIndex: int("sortIndex").default(0),
   isActive: boolean("isActive").default(true).notNull(),
@@ -66,6 +70,12 @@ export const visitorCategories = mysqlTable("visitor_categories", {
   pricePesewas: int("pricePesewas").notNull(),
   /** Short human description, e.g. "Ages 13 and above" */
   description: text("description"),
+  /** Whether this category participates in the group/school booking package. */
+  isGroup: boolean("isGroup").default(false).notNull(),
+  /** Minimum party size for the group package to apply, e.g. 15 students. */
+  groupMinQty: int("groupMinQty").default(15),
+  /** Group package discount in percent (0-100), e.g. 20 for 20% off. */
+  groupDiscountPercent: int("groupDiscountPercent").default(15),
   isActive: boolean("isActive").default(true).notNull(),
   sortIndex: int("sortIndex").default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -113,6 +123,10 @@ export const bookingItems = mysqlTable("booking_items", {
   unitPricePesewas: int("unitPricePesewas").notNull(),
   quantity: int("quantity").notNull(),
   subtotalPesewas: int("subtotalPesewas").notNull(),
+  /** Group/school package discount applied to this line, in pesewas (0 when none). */
+  discountPesewas: int("discountPesewas").default(0).notNull(),
+  /** Discount percent applied (0-100, 0 when none). */
+  discountPercent: int("discountPercent").default(0).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

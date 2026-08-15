@@ -35,6 +35,29 @@ import { Link } from "wouter";
 
 type QtyMap = Record<number, number>;
 
+/** Compute client-side group discount to preview it live in the summary. */
+function groupDiscountFor(cat: {
+  isGroup: boolean;
+  groupMinQty: number | null;
+  groupDiscountPercent: number | null;
+  pricePesewas: number;
+}, quantity: number): { discountPesewas: number; discountPercent: number } {
+  if (!cat.isGroup) return { discountPesewas: 0, discountPercent: 0 };
+  const minQty = cat.groupMinQty ?? 15;
+  const percent = Math.min(100, Math.max(0, cat.groupDiscountPercent ?? 0));
+  if (quantity < minQty || percent <= 0) return { discountPesewas: 0, discountPercent: 0 };
+  return { discountPesewas: Math.round((cat.pricePesewas * quantity * percent) / 100), discountPercent: percent };
+}
+
+function groupRateHint(cat: {
+  isGroup: boolean;
+  groupMinQty: number | null;
+  groupDiscountPercent: number | null;
+}): string | null {
+  if (!cat.isGroup || !(cat.groupDiscountPercent ?? 0)) return null;
+  return `${cat.groupDiscountPercent ?? 0}% group rate from ${cat.groupMinQty ?? 15} visitors`;
+}
+
 function formatPrice(pesewas: number) {
   return `GH₵${(pesewas / 100).toFixed(pesewas % 100 === 0 ? 0 : 2)}`;
 }
@@ -358,14 +381,24 @@ export default function Book() {
                 <div className="space-y-3">
                   {(categories ?? []).map(cat => {
                     const qty = quantities[cat.id] ?? 0;
+                    const hint = groupRateHint(cat);
                     return (
                       <div
                         key={cat.id}
-                        className="flex items-center justify-between gap-4 rounded-lg border border-border bg-card px-4 py-3"
+                        className={cn(
+                          "flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3",
+                          cat.isGroup ? "border-gold/60" : "border-border",
+                        )}
                       >
                         <div className="min-w-0">
                           <p className="font-medium text-sm">{cat.name}</p>
-                          {cat.description && (
+                          {hint && (
+                            <p className="text-xs font-medium mt-0.5 text-amber-700 flex items-center gap-1">
+                              <Ticket className="h-3 w-3" />
+                              {hint}
+                            </p>
+                          )}
+                          {!hint && cat.description && (
                             <p className="text-xs text-muted-foreground mt-0.5">{cat.description}</p>
                           )}
                         </div>
@@ -547,17 +580,25 @@ export default function Book() {
                   <div className="space-y-2 border-t border-border pt-3">
                     {lines.map(line => {
                       const cat = categories?.find(c => c.id === line.categoryId);
+                      const disc = cat ? groupDiscountFor(cat, line.quantity) : { discountPesewas: 0, discountPercent: 0 };
                       return (
-                        <div
-                          key={line.categoryId}
-                          className="flex items-center justify-between text-sm"
-                        >
-                          <span className="text-muted-foreground">
-                            {cat?.name ?? "Category"} × {line.quantity}
-                          </span>
-                          <span>
-                            {cat ? formatPrice(cat.pricePesewas * line.quantity) : "—"}
-                          </span>
+                        <div key={line.categoryId} className="space-y-0.5">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">
+                              {cat?.name ?? "Category"} × {line.quantity}
+                            </span>
+                            <span>
+                              {cat ? formatPrice(cat.pricePesewas * line.quantity) : "—"}
+                            </span>
+                          </div>
+                          {disc.discountPesewas > 0 && (
+                            <div className="flex items-center justify-between text-xs text-amber-700 font-medium pl-1">
+                              <span>
+                                Group package −{disc.discountPercent}% applied
+                              </span>
+                              <span>−{formatPrice(disc.discountPesewas)}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -571,12 +612,41 @@ export default function Book() {
                         <span>{selectedSlots.length}</span>
                       </div>
                     )}
-                    <div className="flex items-center justify-between pt-1 font-display text-xl text-heritage">
-                      <span>Estimated total</span>
-                      <span>
-                        {cost ? formatPrice(cost.totalPesewas) : formatPrice(liveTotal)}
-                      </span>
-                    </div>
+                    {(() => {
+                      const totalDiscount = lines.reduce((sum, line) => {
+                        const cat = categories?.find(c => c.id === line.categoryId);
+                        return sum + (cat ? groupDiscountFor(cat, line.quantity).discountPesewas : 0);
+                      }, 0);
+                      const baseTotal = lines.reduce((sum, line) => {
+                        const cat = categories?.find(c => c.id === line.categoryId);
+                        return sum + (cat ? cat.pricePesewas * line.quantity : 0);
+                      }, 0);
+                      return totalDiscount > 0 ? (
+                        <>
+                          <div className="flex items-center justify-between text-sm text-amber-700 font-medium">
+                            <span>Group/school package discount</span>
+                            <span>−{formatPrice(totalDiscount)}</span>
+                          </div>
+                          {cost ? (
+                            <div className="flex items-center justify-between text-xs text-muted-foreground">
+                              <span>Before discount</span>
+                              <span>{formatPrice(baseTotal)}</span>
+                            </div>
+                          ) : null}
+                          <div className="flex items-center justify-between pt-1 font-display text-xl text-heritage">
+                            <span>Estimated total</span>
+                            <span>{formatPrice(cost ? cost.totalPesewas : baseTotal - totalDiscount)}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-between pt-1 font-display text-xl text-heritage">
+                          <span>Estimated total</span>
+                          <span>
+                            {cost ? formatPrice(cost.totalPesewas) : formatPrice(liveTotal)}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
                 {visitDate &&
