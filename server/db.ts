@@ -681,6 +681,41 @@ export async function getDailyVisitorForecast(days = 14) {
 /** Reference daily visitor capacity used to render the forecast chart. */
 export const DAILY_VISITOR_CAPACITY = 500;
 
+/**
+ * Projected visitor count for a single date (non-cancelled bookings; multi-day
+ * stays are spread evenly across each day of the visit). Used by the public
+ * booking form to warn when the selected date is forecast to exceed capacity.
+ */
+export async function getVisitorCountForDate(date: Date) {
+  const db = await getDb();
+  if (!db) return 0;
+  const detailRows = await db
+    .select({
+      id: bookings.id,
+      visitDate: bookings.visitDate,
+      visitEndDate: bookings.visitEndDate,
+      quantity: bookingItems.quantity,
+    })
+    .from(bookings)
+    .innerJoin(bookingItems, eq(bookings.id, bookingItems.bookingId))
+    .where(
+      and(
+        sql<boolean>`${bookings.status} != 'cancelled'`,
+        lte(bookings.visitDate, sql`DATE_ADD(${date}, INTERVAL 1 DAY)`),
+        gte(sql`COALESCE(${bookings.visitEndDate}, ${bookings.visitDate})`, date),
+      ),
+    );
+
+  let total = 0;
+  for (const row of detailRows) {
+    const start = new Date(row.visitDate);
+    const end = row.visitEndDate ? new Date(row.visitEndDate) : start;
+    const spanDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+    total += row.quantity / spanDays;
+  }
+  return Math.round(total * 10) / 10;
+}
+
 /** Visitor-category breakdown returned as CSV text for offline analysis. */
 export async function getCategoryBreakdownCsv(range?: { from?: Date; to?: Date }) {
   const rows = await getCategoryBreakdown(range);

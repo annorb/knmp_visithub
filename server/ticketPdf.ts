@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import QRCode from "qrcode";
 
 export type TicketData = {
   reference: string;
@@ -50,11 +51,11 @@ function goldLine(doc: PDFKit.PDFDocument, y: number) {
   doc.moveTo(48, y).lineTo(547, y).lineWidth(1.2).strokeColor("#b8860b").stroke().lineWidth(1);
 }
 
-function emitDocument(
+async function emitDocument(
   doc: PDFKit.PDFDocument,
   data: TicketData,
   slotLabels: Map<string, string> | null,
-): void {
+): Promise<void> {
   const green = "#14532d";
   const gold = "#b8860b";
   const ink = "#1c1917";
@@ -83,6 +84,25 @@ function emitDocument(
     48,
     208,
   );
+
+  // ---------- QR code for gate check-in ----------
+  // Encodes the unique booking reference so gate staff can scan and verify it
+  // against the booking record instead of typing the reference manually.
+  const qrPayload = `KNMP-TICKET:${data.reference}`;
+  try {
+    const qrPng = await QRCode.toBuffer(qrPayload, {
+      type: "png",
+      errorCorrectionLevel: "H",
+      margin: 1,
+      color: { dark: green, light: "#ffffff" },
+      width: 150,
+    });
+    doc.image(qrPng, 430, 135, { fit: [115, 115] });
+    doc.fillColor(muted).fontSize(8).font("Helvetica");
+    doc.text("Scan at park entrance", 430, 255, { width: 115, align: "center" });
+  } catch (error) {
+    console.warn("[Ticket] QR code generation failed; ticket still issued:", error);
+  }
 
   // ---------- Visit block ----------
   doc.fillColor(ink).fontSize(13).font("Helvetica-Bold");

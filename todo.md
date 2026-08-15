@@ -82,3 +82,9 @@
 - [x] Daily visitor-capacity forecast: backend daily visitor projection query (next 14 days, multi-day stays spread evenly, capacity constant 500)
 - [x] Frontend: daily visitor-capacity forecast chart with capacity reference line on the analytics page
 - [x] Tests (email helper with mocked fetch, CSV export, forecast query; RESEND key validation) + visual verification — 55 tests passing + checkpoint
+
+## Enhancement Round 6 (user request)
+- [x] Booking status-change email: when admin updates a booking status to confirmed/cancelled, email the visitor with the new status details (sendBookingStatusEmail, fire-and-forget, fallback to account email)
+- [x] QR code on PDF tickets: embed a scannable QR code (KNMP-TICKET:<reference> payload) for gate check-in (qrcode package)
+- [x] Public booking form capacity warning: bookings.capacityCheck procedure + warning banner in booking summary sidebar (near 75% threshold, over at 100% or party would exceed remaining)
+- [x] Tests (status email flow, capacityCheck query) + visual verification + checkpoint — 68 tests passing

@@ -55,6 +55,12 @@ export default function Book() {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  /** Capacity projection for the selected visit date (public forecast). */
+  const capacityQuery = trpc.bookings.capacityCheck.useQuery(
+    { date: visitDate ?? new Date() },
+    { enabled: Boolean(visitDate) },
+  );
+
   const calculateMutation = trpc.bookings.calculateCost.useMutation();
   const createMutation = trpc.bookings.create.useMutation({
     onSuccess: () => {
@@ -573,6 +579,46 @@ export default function Book() {
                     </div>
                   </div>
                 )}
+                {visitDate &&
+                  (() => {
+                    const cap = capacityQuery.data;
+                    const over = cap
+                      ? cap.isOver || (cap.isNear && cap.projectedVisitors + totalVisitors > cap.capacity)
+                      : false;
+                    const near = cap?.isNear === true && !over;
+                    return (
+                      <div className="border-t border-border pt-3">
+                        {capacityQuery.isLoading ? (
+                          <Skeleton className="h-14 w-full" />
+                        ) : cap ? (
+                          over ? (
+                            <p className="text-sm rounded-md bg-destructive/10 text-destructive px-3 py-2.5 leading-relaxed">
+                              <strong>High demand:</strong> {cap.projectedVisitors} visitors are already
+                              projected for {format(visitDate, "d MMM yyyy")} against a daily limit of{" "}
+                              {cap.capacity}. Your party of {totalVisitors || "—"} would exceed the remaining
+                              capacity. Consider choosing another date.
+                            </p>
+                          ) : near ? (
+                            <p className="text-sm rounded-md bg-amber-50 text-amber-700 px-3 py-2.5 leading-relaxed border border-amber-200">
+                              <strong>Almost full:</strong> {cap.projectedVisitors} visitors are already
+                              projected for {format(visitDate, "d MMM yyyy")} (limit {cap.capacity}). Your
+                              party would leave little spare capacity — booking early is recommended.
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              <Check className="h-3.5 w-3.5 text-heritage" />
+                              {cap.projectedVisitors} visitors projected for{" "}
+                              {format(visitDate, "d MMM yyyy")} — comfortable availability.
+                            </p>
+                          )
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Capacity projection unavailable for past dates.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 {error && (
                   <p className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2">
                     {error}

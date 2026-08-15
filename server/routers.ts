@@ -25,6 +25,7 @@ import {
   getCategoryBreakdown,
   getCategoryBreakdownCsv,
   getDailyVisitorForecast,
+  getVisitorCountForDate,
   DAILY_VISITOR_CAPACITY,
   getMonthlyTrends,
   getMyBookings,
@@ -55,7 +56,7 @@ import {
   updateItineraryItem,
 } from "./db";
 import { buildTicketPdfBuffer, type TicketData } from "./ticketPdf";
-import { sendBookingConfirmationEmail } from "./email";
+import { sendBookingConfirmationEmail, sendBookingStatusEmail } from "./email";
 import { buildItineraryPdfBuffer, isoDate, type ItineraryPdfData, type ItineraryRow } from "./itineraryPdf";
 import { nanoid } from "nanoid";
 import type { InsertAttraction, InsertVisitorCategory } from "../drizzle/schema";
@@ -254,7 +255,27 @@ export const appRouter = router({
   }),
 
   bookings: router({
-    /** Server-side cost calculation for a set of {categoryId, quantity} pairs. */
+    /** Projected park occupancy for a single date, for the public capacity warning. */
+    capacityCheck: publicProcedure
+      .input(z.object({ date: z.date() }))
+      .query(async ({ input }) => {
+        const date = dateOnly(input.date);
+        const now = dateOnly(new Date());
+        if (date < now) return null;
+        const projectedVisitors = await getVisitorCountForDate(date);
+        const capacity = DAILY_VISITOR_CAPACITY;
+        const utilization = capacity > 0 ? projectedVisitors / capacity : 0;
+        return {
+          date,
+          projectedVisitors,
+          capacity,
+          isOver: utilization >= 1,
+          /** Warning threshold: the date is already 75%+ booked. */
+          isNear: utilization >= 0.75,
+          utilization,
+        } as const;
+      }),
+
     calculateCost: publicProcedure
       .input(
         z.object({
@@ -478,6 +499,43 @@ export const appRouter = router({
           targetName: before?.visitorName ?? before?.reference ?? null,
           detail: `Booking ${before?.reference ?? input.id} status changed from ${before?.status ?? "?"} to ${input.status}`,
         });
+
+        // Notify the visitor by email when the booking is confirmed or cancelled.
+        // Kept fire-and-forget and non-fatal: the status update and audit trail
+        // always stand regardless of whether the email reaches the provider.
+        if (before && (input.status === "confirmed" || input.status === "cancelled") && before.status !== input.status) {
+          // Resolve the visitor's email: contact email on the booking first,
+          // then the account email of the user who made the booking.
+          const items = await getBookingItemsByBookingId(before.id);
+          const accountUser = before.userId
+            ? (await listAllUsers()).find(u => u.id === before.userId)
+            : undefined;
+          const contactEmail = before.contactEmail || accountUser?.email;
+          const totalVisitors = items.reduce((sum, i) => sum + i.quantity, 0);
+          void (async () => {
+            try {
+              const emailResult = await sendBookingStatusEmail({
+                to: contactEmail ?? "",
+                recipientName: before.visitorName ?? accountUser?.name ?? null,
+                booking: {
+                  reference: before.reference,
+                  visitDate: before.visitDate,
+                  visitEndDate: before.visitEndDate ?? null,
+                  totalPesewas: before.totalPesewas,
+                  totalVisitors,
+                },
+                previousStatus: before.status,
+                newStatus: input.status,
+                siteBaseUrl: "https://knmp-visithub.manus.space",
+              });
+              if (!emailResult.sent && emailResult.reason) {
+                console.warn(`[Email] Status notification not sent for ${before.reference}: ${emailResult.reason}`);
+              }
+            } catch (error) {
+              console.warn(`[Email] Status notification step failed for ${before.reference}:`, error);
+            }
+          })();
+        }
         return { success: true } as const;
       }),
     stats: adminProcedure.query(() => getBookingStats()),
