@@ -97,3 +97,14 @@
 - [x] Gate check-in page (/admin/gate): scan QR (jsqr camera + manual reference input), auto check-in on valid scan, booking details + undo, sidebar link
 - [x] Admin add-user button on Users page: dialog form (name, email) creates account matched to Manus OAuth email; users.create server procedure
 - [x] Tests (server/round7.test.ts: settings round-trip, gate check-in/undo, cancelled-blocked, users.create duplicate rejection) + visual verification — 77 tests passing + checkpoint
+
+## Documentation set (user request)
+- [x] {i} — overview, architecture, features, schema, SDLC
+- [x] {i} — software requirements specification (actors, functional/non-functional requirements, use cases, constraints)
+- [x] {i} — test strategy, suite inventory, results, coverage narrative
+- [x] {i} — debt register + remediation plan
+- [x] {i} — visitor + admin usage guide with workflows
+- [x] {i} — live deployment URL + GitHub export info
+
+## GitHub export (user request)
+- [ ] Export KNMP VisitHub source to the user's GitHub account
