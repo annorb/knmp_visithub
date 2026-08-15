@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { COOKIE_NAME } from "@shared/const";
+import { DEFAULT_DAILY_CAPACITY, DEFAULT_NEAR_CAPACITY_THRESHOLD } from "../drizzle/schema";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -10,6 +12,14 @@ import {
   createBookingItem,
   createBookingSlot,
   createCategory,
+  checkInBooking,
+  undoCheckInBooking,
+  listSiteSettings,
+  updateSiteSetting,
+  SETTING_DAILY_CAPACITY,
+  SETTING_NEAR_CAPACITY_THRESHOLD,
+  getBookingByReference,
+  createUser,
   createItineraryItem,
   deleteAttraction,
   deleteCategory,
@@ -26,7 +36,8 @@ import {
   getCategoryBreakdownCsv,
   getDailyVisitorForecast,
   getVisitorCountForDate,
-  DAILY_VISITOR_CAPACITY,
+  getDailyCapacity,
+  getNearCapacityThreshold,
   getMonthlyTrends,
   getMyBookings,
   getUpcomingMyBookings,
@@ -262,16 +273,20 @@ export const appRouter = router({
         const date = dateOnly(input.date);
         const now = dateOnly(new Date());
         if (date < now) return null;
-        const projectedVisitors = await getVisitorCountForDate(date);
-        const capacity = DAILY_VISITOR_CAPACITY;
+        const [projectedVisitors, capacity, nearThreshold] = await Promise.all([
+          getVisitorCountForDate(date),
+          getDailyCapacity(),
+          getNearCapacityThreshold(),
+        ]);
         const utilization = capacity > 0 ? projectedVisitors / capacity : 0;
         return {
           date,
           projectedVisitors,
           capacity,
+          nearThreshold,
           isOver: utilization >= 1,
-          /** Warning threshold: the date is already 75%+ booked. */
-          isNear: utilization >= 0.75,
+          /** Warning threshold: the date is at/above the configured near-capacity threshold. */
+          isNear: utilization >= nearThreshold,
           utilization,
         } as const;
       }),
@@ -544,6 +559,32 @@ export const appRouter = router({
   /** Admin user management: view users, change roles, activate/deactivate. */
   users: router({
     listAll: adminProcedure.query(() => listAllUsers()),
+    create: adminProcedure
+      .input(
+        z.object({
+          name: z.string().min(1).max(200),
+          email: z.string().email().max(320),
+          role: z.enum(["user", "admin"]).default("user"),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        const created = await createUser({ name: input.name, email: input.email, role: input.role });
+        if (!created) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "A user with that email address already exists",
+          });
+        }
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "user_created",
+          targetUserId: created.id,
+          targetName: created.name ?? created.email ?? null,
+          detail: `Account created${input.role !== "user" ? ` with role ${input.role}` : ""} by administrator`,
+        });
+        return { success: true, user: created } as const;
+      }),
     updateRole: adminProcedure
       .input(z.object({ userId: z.number().int().positive(), role: z.enum(["user", "admin"]) }))
       .mutation(async ({ ctx, input }) => {
@@ -581,6 +622,105 @@ export const appRouter = router({
   /** Admin audit trail of sensitive actions. */
   audit: router({
     list: adminProcedure.query(() => listAuditEvents()),
+  }),
+
+  /** Site-wide settings: daily capacity and warning thresholds. */
+  settings: router({
+    list: adminProcedure.query(async () => {
+      const [rows, capacity, nearThreshold] = await Promise.all([
+        listSiteSettings(),
+        getDailyCapacity(),
+        getNearCapacityThreshold(),
+      ]);
+      return { settings: rows, capacity, nearThreshold };
+    }),
+    update: adminProcedure
+      .input(
+        z.object({
+          capacity: z.number().int().min(10).max(100_000).optional(),
+          nearThreshold: z.number().min(0.1).max(0.99).optional(),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        if (input.capacity !== undefined) {
+          await updateSiteSetting(
+            SETTING_DAILY_CAPACITY,
+            String(input.capacity),
+            "Reference daily visitor capacity used for the forecast chart and booking-form warnings",
+          );
+        }
+        if (input.nearThreshold !== undefined) {
+          await updateSiteSetting(
+            SETTING_NEAR_CAPACITY_THRESHOLD,
+            String(input.nearThreshold),
+            "Fraction of capacity that triggers the near-capacity warning on the booking form (0–1)",
+          );
+        }
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "settings_changed",
+          targetUserId: null,
+          targetName: null,
+          detail: `Site settings updated: ${JSON.stringify(input)}`,
+        });
+        const [, capacity, nearThreshold] = await Promise.all([
+          null,
+          getDailyCapacity(),
+          getNearCapacityThreshold(),
+        ]);
+        return { success: true, capacity, nearThreshold } as const;
+      }),
+  }),
+
+  /**
+   * Gate check-in: staff mark a visitor's party as checked in (or undo it).
+   * Looked up by booking reference so a scanned QR code resolves directly.
+   */
+  gate: router({
+    lookupByReference: adminProcedure
+      .input(z.object({ reference: z.string().min(4).max(32) }))
+      .query(async ({ input }) => {
+        const raw = await getBookingByReference(input.reference.toUpperCase());
+        if (!raw) return { booking: null, items: [] };
+        const { items, ...booking } = raw;
+        return { booking, items };
+      }),
+    checkIn: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const booking = await getBookingById(input.id);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        if (booking.status === "cancelled") {
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Cancelled bookings cannot be checked in" });
+        }
+        const checkInAt = await checkInBooking(input.id);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "booking_checked_in",
+          targetUserId: booking.userId ?? null,
+          targetName: booking.visitorName ?? booking.reference ?? null,
+          detail: `Visitor party for ${booking.reference} checked in at the gate`,
+        });
+        return { success: true, checkInAt } as const;
+      }),
+    undoCheckIn: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const booking = await getBookingById(input.id);
+        if (!booking) throw new TRPCError({ code: "NOT_FOUND", message: "Booking not found" });
+        await undoCheckInBooking(input.id);
+        await createAuditEvent({
+          actorId: ctx.user.id,
+          actorName: ctx.user.name ?? ctx.user.email ?? null,
+          action: "booking_checkin_undone",
+          targetUserId: booking.userId ?? null,
+          targetName: booking.visitorName ?? booking.reference ?? null,
+          detail: `Gate check-in for ${booking.reference} was undone`,
+        });
+        return { success: true } as const;
+      }),
   }),
 
   /** Public guided-tour time slots per attraction. */

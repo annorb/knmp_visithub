@@ -11,6 +11,11 @@ import {
   bookingSlots,
   users,
   visitorCategories,
+  siteSettings,
+  DEFAULT_DAILY_CAPACITY,
+  DEFAULT_NEAR_CAPACITY_THRESHOLD,
+  type SiteSetting,
+  type BookingItem,
   type InsertAttraction,
   type InsertAuditEvent,
   type InsertBooking,
@@ -109,6 +114,31 @@ export async function listAllUsers() {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(users).orderBy(users.createdAt).limit(500);
+}
+
+/**
+ * Create a manually-provisioned user account.
+ * Accounts created this way use a synthetic openId (`local:<email>`) because
+ * they skip Manus OAuth; they exist for records, roles, and audit purposes
+ * and are shown in the users list like any other account.
+ */
+export async function createUser(data: { name: string; email: string; role: "user" | "admin" }) {
+  const db = await getDb();
+  if (!db) return null;
+  const openId = `local:${(data.email ?? "").toLowerCase()}`;
+  const rows = await db.select({ id: users.id }).from(users).where(eq(users.openId, openId));
+  if (rows.length > 0) return null; // duplicate
+  const result = await db.insert(users).values({
+    openId,
+    name: data.name,
+    email: data.email,
+    loginMethod: "manual",
+    role: data.role,
+    isActive: true,
+  });
+  void result;
+  const created = await db.select().from(users).where(eq(users.openId, openId));
+  return created.length > 0 ? created[0] : undefined;
 }
 
 export async function updateUserRole(userId: number, role: "user" | "admin", selfId: number) {
@@ -375,7 +405,10 @@ export async function getBookingByReference(reference: string) {
     .from(bookings)
     .where(eq(bookings.reference, reference))
     .limit(1);
-  return rows.length > 0 ? rows[0] : undefined;
+  const booking = rows.length > 0 ? rows[0] : undefined;
+  if (!booking) return undefined;
+  const items = await getBookingItemsByBookingId(booking.id);
+  return { ...booking, items } as typeof booking & { items: BookingItem[] };
 }
 
 export async function getBookingItemsByBookingId(bookingId: number) {
@@ -663,7 +696,8 @@ export async function getDailyVisitorForecast(days = 14) {
     }
   }
 
-  const result: { date: string; visitors: number; bookings: number }[] = [];
+  const [capacity, nearThreshold] = await Promise.all([getDailyCapacity(), getNearCapacityThreshold()]);
+  const result: { date: string; visitors: number; bookings: number; capacity: number; nearThreshold: number }[] = [];
   for (let i = 0; i < count; i += 1) {
     const now = new Date();
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + i));
@@ -673,13 +707,83 @@ export async function getDailyVisitorForecast(days = 14) {
       date: key,
       visitors: bucket ? Math.round(bucket.visitors * 10) / 10 : 0,
       bookings: bucket ? bucket.bookings.size : 0,
+      capacity,
+      nearThreshold,
     });
   }
   return result;
 }
 
-/** Reference daily visitor capacity used to render the forecast chart. */
-export const DAILY_VISITOR_CAPACITY = 500;
+/** Reference daily visitor capacity used when no setting row exists. */
+export const DEFAULT_DAILY_VISITOR_CAPACITY = 500;
+
+/** Keys used in the site_settings table. */
+export const SETTING_DAILY_CAPACITY = "daily_capacity";
+export const SETTING_NEAR_CAPACITY_THRESHOLD = "near_capacity_threshold";
+
+/**
+ * Read a site setting value with a fallback default when the row is missing.
+ */
+export async function getSiteSetting(key: string, fallback: string): Promise<string> {
+  const db = await getDb();
+  if (!db) return fallback;
+  const rows = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, key));
+  const value = rows[0]?.value;
+  return value === null || value === undefined || value === "" ? fallback : value;
+}
+
+export async function listSiteSettings(): Promise<SiteSetting[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(siteSettings);
+}
+
+export async function updateSiteSetting(key: string, value: string, description: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db
+    .insert(siteSettings)
+    .values({ key, value, description })
+    .onDuplicateKeyUpdate({ set: { value, description } });
+}
+
+/** Daily capacity from settings with fallback to the default. */
+export async function getDailyCapacity(): Promise<number> {
+  const value = await getSiteSetting(SETTING_DAILY_CAPACITY, String(DEFAULT_DAILY_VISITOR_CAPACITY));
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_DAILY_VISITOR_CAPACITY;
+}
+
+/** Near-capacity warning threshold (fraction) from settings with fallback. */
+export async function getNearCapacityThreshold(): Promise<number> {
+  const value = await getSiteSetting(SETTING_NEAR_CAPACITY_THRESHOLD, String(DEFAULT_NEAR_CAPACITY_THRESHOLD));
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 1 ? parsed : DEFAULT_NEAR_CAPACITY_THRESHOLD;
+}
+
+/** Mark a booking as checked in at the gate (returns the check-in timestamp). */
+export async function checkInBooking(id: number): Promise<Date | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const pre = await db
+    .select({ status: bookings.status })
+    .from(bookings)
+    .where(eq(bookings.id, id))
+    .limit(1);
+  if (pre[0]?.status === "cancelled") {
+    throw new Error("Cancelled bookings cannot be checked in.");
+  }
+  await db.update(bookings).set({ checkInAt: new Date() }).where(eq(bookings.id, id));
+  const rows = await db.select({ checkInAt: bookings.checkInAt }).from(bookings).where(eq(bookings.id, id));
+  return rows[0]?.checkInAt ?? null;
+}
+
+/** Undo a gate check-in, restoring the booking to unchecked. */
+export async function undoCheckInBooking(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(bookings).set({ checkInAt: null }).where(eq(bookings.id, id));
+}
 
 /**
  * Projected visitor count for a single date (non-cancelled bookings; multi-day

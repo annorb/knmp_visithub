@@ -29,7 +29,7 @@ import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { useMemo } from "react";
 import { format } from "date-fns";
-import { Eye, Loader2 } from "lucide-react";
+import { Eye, Loader2, QrCode, XCircle, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 type BookingRow = {
@@ -45,6 +45,7 @@ type BookingRow = {
   totalPesewas: number;
   status: "pending" | "confirmed" | "cancelled";
   notes: string | null;
+  checkInAt: Date | null;
   createdAt: Date;
 };
 
@@ -68,6 +69,7 @@ export default function AdminBookings() {
       utils.bookings.stats.invalidate();
     },
   });
+  const [checkInFilter, setCheckInFilter] = useState<"all" | "checkedIn" | "notCheckedIn">("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const { data: detail } = trpc.bookings.byId.useQuery(
     { id: selectedId ?? 0 },
@@ -104,11 +106,42 @@ export default function AdminBookings() {
     <DashboardLayout>
       <div className="p-4 md:p-6 max-w-6xl">
         <div className="mb-6">
-          <h1 className="font-display text-3xl font-semibold">Bookings</h1>
-          <p className="text-sm text-muted-foreground">
-            Every visitor booking on the platform. Use the status control to
-            confirm arrivals or record cancellations.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="font-display text-3xl font-semibold">Bookings</h1>
+              <p className="text-sm text-muted-foreground">
+                Every visitor booking on the platform. Use the status control to
+                confirm arrivals or record cancellations.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-md border border-input bg-background p-1">
+              {(
+                [
+                  { value: "all", label: "All", icon: ShieldCheck },
+                  { value: "checkedIn", label: "Checked in", icon: QrCode },
+                  { value: "notCheckedIn", label: "Not checked in", icon: XCircle },
+                ] as const
+              ).map(opt => {
+                const Icon = opt.icon;
+                const active = checkInFilter === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setCheckInFilter(opt.value)}
+                    className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "bg-heritage text-white"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {isLoading ? (
@@ -123,6 +156,16 @@ export default function AdminBookings() {
               No bookings have been made yet.
             </CardContent>
           </Card>
+        ) : !(() => {
+            if (checkInFilter === "checkedIn") return rows.some(r => r.checkInAt);
+            if (checkInFilter === "notCheckedIn") return rows.some(r => !r.checkInAt);
+            return true;
+          })() ? (
+          <Card>
+            <CardContent className="py-14 text-center text-muted-foreground text-sm">
+              No bookings match the selected check-in filter.
+            </CardContent>
+          </Card>
         ) : (
           <Card>
             <CardContent className="p-0 overflow-x-auto">
@@ -134,12 +177,18 @@ export default function AdminBookings() {
                     <TableHead>Contact</TableHead>
                     <TableHead>Visit dates</TableHead>
                     <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Check-in</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-10"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {[...rows]
+                    .filter(row => {
+                      if (checkInFilter === "checkedIn") return Boolean(row.checkInAt);
+                      if (checkInFilter === "notCheckedIn") return !row.checkInAt;
+                      return true;
+                    })
                     .sort(
                       (a, b) =>
                         new Date(b.visitDate).getTime() - new Date(a.visitDate).getTime(),
@@ -169,11 +218,29 @@ export default function AdminBookings() {
                           {formatPrice(row.totalPesewas)}
                         </TableCell>
                         <TableCell>
+                          {row.checkInAt ? (
+                            <Badge className="bg-heritage/15 text-heritage hover:bg-heritage/20">
+                              Checked in {format(new Date(row.checkInAt), "d MMM HH:mm")}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge variant={statusStyles[row.status] ?? "secondary"}>
                             {row.status}
                           </Badge>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="flex items-center gap-1 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => window.open(`/admin/gate?ref=${row.reference}`, "_blank")}
+                            aria-label="Check in at gate"
+                          >
+                            <QrCode className="h-4 w-4 text-muted-foreground" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"

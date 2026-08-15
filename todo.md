@@ -88,3 +88,12 @@
 - [x] QR code on PDF tickets: embed a scannable QR code (KNMP-TICKET:<reference> payload) for gate check-in (qrcode package)
 - [x] Public booking form capacity warning: bookings.capacityCheck procedure + warning banner in booking summary sidebar (near 75% threshold, over at 100% or party would exceed remaining)
 - [x] Tests (status email flow, capacityCheck query) + visual verification + checkpoint — 68 tests passing
+
+## Enhancement Round 7 (user request)
+- [x] Check-ins tracking: bookings.checkInAt timestamp column + checkIn(id) + undoCheckIn (cancelled bookings blocked); gate router (lookupByReference/checkIn/undoCheckIn) with audit events
+- [x] Visual check-in indicator on admin bookings page: Check-in column with Checked-in badge + gate shortcut button
+- [x] Site settings: `site_settings` table (migration 0006) + settings.list/update adminProcedure + /admin/settings page
+- [x] Capacity warning + forecast respect configured settings (fallback defaults 500/75%) — capacityCheck returns capacity + nearThreshold; forecast rows carry capacity
+- [x] Gate check-in page (/admin/gate): scan QR (jsqr camera + manual reference input), auto check-in on valid scan, booking details + undo, sidebar link
+- [x] Admin add-user button on Users page: dialog form (name, email) creates account matched to Manus OAuth email; users.create server procedure
+- [x] Tests (server/round7.test.ts: settings round-trip, gate check-in/undo, cancelled-blocked, users.create duplicate rejection) + visual verification — 77 tests passing + checkpoint

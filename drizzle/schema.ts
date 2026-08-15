@@ -92,6 +92,8 @@ export const bookings = mysqlTable("bookings", {
   totalPesewas: int("totalPesewas").notNull(),
   status: mysqlEnum("status", ["pending", "confirmed", "cancelled"]).default("pending").notNull(),
   notes: text("notes"),
+  /** When set, the visitor party has been checked in at the gate. */
+  checkInAt: timestamp("checkInAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -214,3 +216,22 @@ export const itineraryShares = mysqlTable("itinerary_shares", {
 
 export type ItineraryShare = typeof itineraryShares.$inferSelect;
 export type InsertItineraryShare = typeof itineraryShares.$inferInsert;
+
+/**
+ * Site-wide settings stored as key/value rows (capacity limits, thresholds).
+ */
+export const siteSettings = mysqlTable("site_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  key: varchar("key", { length: 64 }).notNull().unique(),
+  value: text("value"),
+  description: text("description"),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SiteSetting = typeof siteSettings.$inferSelect;
+export type InsertSiteSetting = typeof siteSettings.$inferInsert;
+
+/** Default daily visitor capacity used when no setting row exists. */
+export const DEFAULT_DAILY_CAPACITY = 500;
+/** Default near-capacity warning threshold (fraction) used when no setting exists. */
+export const DEFAULT_NEAR_CAPACITY_THRESHOLD = 0.75;

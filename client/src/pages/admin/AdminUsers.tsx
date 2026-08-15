@@ -16,11 +16,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Shield, Users, MoreVertical, UserCheck, UserX } from "lucide-react";
+import { Shield, Users, MoreVertical, UserCheck, UserX, UserPlus, Loader2, Crown } from "lucide-react";
 import { useState } from "react";
 
 type PlatformUser = {
@@ -45,6 +47,11 @@ export default function AdminUsers() {
     action: "deactivate" | "activate" | "promote" | "demote" | null;
   }>({ open: false, target: null, action: null });
 
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addRole, setAddRole] = useState<"user" | "admin">("user");
+
   const roleMutation = trpc.users.updateRole.useMutation({
     onSettled: () => {
       utils.users.listAll.invalidate();
@@ -63,7 +70,22 @@ export default function AdminUsers() {
     },
   });
 
-  const pending = roleMutation.isPending || activationMutation.isPending;
+  const createMutation = trpc.users.create.useMutation({
+    onSuccess: result => {
+      const u = result.user;
+      toast.success(`${u.name ?? u.email} has been added and can now sign in with Manus OAuth.`);
+      utils.users.listAll.invalidate();
+      setAddUserOpen(false);
+      setAddName("");
+      setAddEmail("");
+    },
+    onError: err => {
+      toast.error(err.message || "Could not add the user.");
+    },
+  });
+
+  const pending =
+    roleMutation.isPending || activationMutation.isPending || createMutation.isPending;
 
   const confirmAction = async () => {
     if (!dialog.target || !dialog.action) return;
@@ -132,8 +154,14 @@ export default function AdminUsers() {
               <Users className="h-4 w-4 text-primary" />
               Registered users
             </CardTitle>
-            <span className="text-sm text-muted-foreground">
-              {isLoading ? "—" : `${(users ?? []).length} total`}
+            <span className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {isLoading ? "—" : `${(users ?? []).length} total`}
+              </span>
+              <Button size="sm" onClick={() => setAddUserOpen(true)}>
+                <UserPlus className="h-4 w-4 mr-1.5" />
+                Add user
+              </Button>
             </span>
           </CardHeader>
           <CardContent>
@@ -295,6 +323,96 @@ export default function AdminUsers() {
               {dialog.action === "demote" && "Make visitor"}
               {dialog.action === "deactivate" && "Deactivate"}
               {dialog.action === "activate" && "Reactivate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a new user</DialogTitle>
+            <DialogDescription>
+              Create an account for a staff member or visitor. They will sign in with
+              Manus OAuth the first time; their account will be matched to the email
+              address you enter here.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="add-name" className="mb-1.5 block">
+                Full name
+              </Label>
+              <Input
+                id="add-name"
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                placeholder="Jane Doe"
+              />
+            </div>
+            <div>
+              <Label htmlFor="add-email" className="mb-1.5 block">
+                Email address
+              </Label>
+              <Input
+                id="add-email"
+                type="email"
+                value={addEmail}
+                onChange={e => setAddEmail(e.target.value)}
+                placeholder="jane@example.com"
+              />
+              <p className="text-xs text-muted-foreground mt-1.5">
+                Used to match the account when the user signs in.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="add-role" className="mb-1.5 block">
+                Role
+              </Label>
+              <div className="flex items-center gap-1.5 rounded-md border border-input bg-background p-1">
+                {(
+                  [
+                    { value: "user", label: "Visitor" },
+                    { value: "admin", label: "Administrator" },
+                  ] as const
+                ).map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setAddRole(opt.value)}
+                    className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-2 text-xs font-medium transition-colors ${
+                      addRole === opt.value
+                        ? "bg-heritage text-white"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                    }`}
+                  >
+                    <Crown className="h-3.5 w-3.5" />
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setAddUserOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={createMutation.isPending || !addName.trim() || !addEmail.trim()}
+              onClick={() =>
+                createMutation.mutate({
+                  name: addName.trim(),
+                  email: addEmail.trim().toLowerCase(),
+                  role: addRole,
+                })
+              }
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <UserPlus className="h-4 w-4 mr-1.5" />
+              )}
+              Add user
             </Button>
           </DialogFooter>
         </DialogContent>

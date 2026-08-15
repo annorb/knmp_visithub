@@ -304,7 +304,7 @@ export default function AdminAnalytics() {
             <CardDescription>
               Projected visitors per day for the next 14 days, based on confirmed and pending
               bookings. Multi-day stays are spread across each day of the visit. The dashed line
-              marks the park's reference daily capacity of 500 visitors.
+              marks the configured daily capacity.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -321,7 +321,7 @@ export default function AdminAnalytics() {
                     data={forecast.map(f => ({
                       ...f,
                       day: f.date.slice(8),
-                      capacity: 500,
+                      capacity: typeof f.capacity === "number" && f.capacity > 0 ? f.capacity : 500,
                       dayLabel: new Date(`${f.date}T00:00:00.000Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
                     }))}
                     margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
@@ -362,10 +362,15 @@ export default function AdminAnalytics() {
                     <Bar dataKey="capacity" fill="#f4f4f5" radius={0} isAnimationActive={false} />
                     <Bar dataKey="visitors" fill="#14532d" radius={[4, 4, 0, 0]} />
                     <ReferenceLine
-                      y={500}
+                      y={forecast[0]?.capacity ?? 500}
                       stroke="#b91c1c"
                       strokeDasharray="6 4"
-                      label={{ value: "Capacity 500", position: "insideTopRight", fontSize: 11, fill: "#b91c1c" }}
+                      label={{
+                        value: `Capacity ${forecast[0]?.capacity ?? 500}`,
+                        position: "insideTopRight",
+                        fontSize: 11,
+                        fill: "#b91c1c",
+                      }}
                     />
                   </BarChart>
                 </ResponsiveContainer>
