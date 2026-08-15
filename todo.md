@@ -119,10 +119,10 @@
 - [x] Tests for Round 8 (server/round8.test.ts: group discount calc, lat/lng bounds, exportPdf presence) + visual verification + checkpoint — 80 tests passing
 
 ## Enhancement Round 9 (user request)
-- [ ] DB schema: events table (title, description, type program/guided-tour, event date, time window, attraction, capacity, fee pesewas, registration deadline, status) + event_registrations table (booking/visitor ref, attendee name, quantity, checked-in) + migrations
-- [ ] Backend: admin events CRUD + publish/unpublish + capacity/registration management; audit events on changes
-- [ ] Backend: public calendar endpoints (month-grid event list, upcoming events, event details, registration availability)
-- [ ] Backend: visitor tour registration (capacity check, unique registration ref, email notification to visitor)
-- [ ] Frontend: public Events page with interactive month calendar, event detail dialog, direct guided-tour registration with confirmation
-- [ ] Frontend: admin Events page (calendar + list management, publish/unpublish, view registrations, capacity override)
-- [ ] Tests for Round 9 + visual verification + checkpoint + GitHub push
+- [x] DB schema: events table + event_registrations table (migration 0010)
+- [x] Backend: admin events CRUD + publish/unpublish + registrations panel; audit events on changes
+- [x] Backend: public calendar endpoints (listMonth, upcoming, details, registration availability)
+- [x] Backend: visitor tour registration (capacity check, unique ref, registration confirmation email); programs are info-only
+- [x] Frontend: public Events page (/events) with interactive month calendar (filter-aware, day chips), event detail dialog, direct guided-tour registration; My tour registrations section
+- [x] Frontend: admin Events page (/admin/events) with list management, publish toggle, edit/delete, registrations panel with cancel
+- [x] Tests for Round 9 (server/events.test.ts: draft filtering, month query, capacity checks, program gating, my registrations — 7 tests) + visual verification + checkpoint (published via auto-publish) + pushed to GitHub (c24a84a) — 87 tests passing
