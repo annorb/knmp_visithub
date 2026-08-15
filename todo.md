@@ -107,4 +107,4 @@
 - [x] {i} — live deployment URL + GitHub export info
 
 ## GitHub export (user request)
-- [ ] Export KNMP VisitHub source to the user's GitHub account
+- [x] Export KNMP VisitHub source to the user's GitHub account (full history pushed via SSH to annorb/knmp_visithub)
