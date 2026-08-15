@@ -368,7 +368,7 @@ export async function generateUniqueReference(): Promise<string> {
   if (!db) throw new Error("Database unavailable");
   for (let attempt = 0; attempt < 10; attempt++) {
     const rand = new Uint32Array(6);
-    crypto.getRandomValues(rand);
+    (globalThis.crypto ?? (await import("node:crypto")).webcrypto).getRandomValues(rand);
     const code = Array.from(rand, (n) => REF_CHARS[n % REF_CHARS.length]).join("");
     const reference = `KNMP-${code}`;
     const rows = await db
