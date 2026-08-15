@@ -744,3 +744,37 @@ describe("analytics date-range parameters", () => {
     expect(getMonthlyTrends).toHaveBeenCalledWith(6, undefined);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Live-database regression tests for the analytics date-range bug.
+// These run the real db helpers (unmocked) so the generated SQL is actually
+// exercised against the TiDB connection whenever DATABASE_URL is set.
+// ---------------------------------------------------------------------------
+describe("analytics queries with date range (live db)", () => {
+  it("getMonthlyTrends executes without throwing when a visit-date range is applied", async () => {
+    const actual = await vi.importActual<typeof import("./db")>("./db");
+    const from = new Date(Date.UTC(2026, 7, 1));
+    const to = new Date(Date.UTC(2026, 7, 16));
+    await expect(actual.getMonthlyTrends(6, { from, to })).resolves.toBeDefined();
+    const rows = await actual.getMonthlyTrends(6, { from, to });
+    expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it("getCategoryBreakdown executes without throwing when a visit-date range is applied", async () => {
+    const actual = await vi.importActual<typeof import("./db")>("./db");
+    const from = new Date(Date.UTC(2026, 7, 1));
+    const to = new Date(Date.UTC(2026, 7, 16));
+    await expect(actual.getCategoryBreakdown({ from, to })).resolves.toBeDefined();
+    const rows = await actual.getCategoryBreakdown({ from, to });
+    expect(Array.isArray(rows)).toBe(true);
+  });
+
+  it("getBookingStats executes without throwing when a visit-date range is applied", async () => {
+    const actual = await vi.importActual<typeof import("./db")>("./db");
+    const from = new Date(Date.UTC(2026, 7, 1));
+    const to = new Date(Date.UTC(2026, 7, 16));
+    const stats = await actual.getBookingStats({ from, to });
+    expect(stats).toHaveProperty("total");
+    expect(stats).toHaveProperty("revenuePesewas");
+  });
+});

@@ -615,7 +615,7 @@ export async function getCategoryBreakdown(range?: { from?: Date; to?: Date }) {
     .innerJoin(bookings, eq(bookingItems.bookingId, bookings.id))
     .where(rangeFilter)
     .groupBy(bookingItems.categoryId, bookingItems.categoryName)
-    .orderBy(sql`revenuePesewas DESC`);
+    .orderBy(sql`4 DESC`);
 }
 
 /** Monthly revenue & booking trends, optionally scoped to a visit-date range. */
@@ -640,7 +640,7 @@ export async function getMonthlyTrends(months = 6, range?: { from?: Date; to?: D
       ),
     )
     .groupBy(sql`date_format(${bookings.createdAt}, '%Y-%m')`)
-    .orderBy(sql`month ASC`);
+    .orderBy(sql`1 ASC`);
   return rows;
 }
 

@@ -69,3 +69,8 @@
 - [x] Frontend: Itinerary page export-to-PDF and copy-share-link actions
 - [x] Frontend: admin Analytics date-range picker (start/end dates) applied to breakdown + trends + KPIs
 - [x] Tests (44 passing incl. export/share, extended audit trail, analytics range) + visual verification + checkpoint
+
+## Bugfix Round (user report)
+- [x] Fix /admin analytics query failure: monthly trends SQL breaks when a visitDate range (from/to) is passed; review range semantics across stats, breakdown, trends and AdminAnalytics UI
+- [x] Root cause: TiDB prepared-statement path rejects SELECT-list aliases in ORDER BY; changed to positional ordering (sql`1 ASC`, sql`4 DESC`) in getMonthlyTrends and getCategoryBreakdown
+- [x] Add live-db regression tests for getMonthlyTrends / getCategoryBreakdown / getBookingStats with date ranges (47 tests passing)
